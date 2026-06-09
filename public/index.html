@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+  <title>Edits Viewer v1.0</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="header">
+  <table class="headertable" width="100%" cellpadding="4" cellspacing="0">
+    <tr>
+      <td width="180" class="logo">
+        <b>EDITS VIEWER</b> <span class="version">v1.0</span>
+      </td>
+      <td class="searchcell">
+        <form id="searchForm" onsubmit="return false;">
+          <input type="text" id="searchInput" placeholder="Search by filename or tag..." accesskey="/">
+          <label class="fav-filter-label">
+            <input type="checkbox" id="favFilter"> Favorites only
+          </label>
+          <span id="resultCount" class="result-count">0 videos</span>
+          <span class="view-toggle">
+            <button class="btn btn-small view-btn active" id="viewListBtn" onclick="setViewMode('list')" title="List view">&#x2630;</button>
+            <button class="btn btn-small view-btn" id="viewGridBtn" onclick="setViewMode('grid')" title="Grid view">&#x25A6;</button>
+          </span>
+        </form>
+      </td>
+      <td width="100" align="right" class="actioncell">
+        <button class="btn" id="rescanBtn" onclick="rescanVideos()">&#x21bb; Rescan</button>
+      </td>
+    </tr>
+  </table>
+</div>
+
+<div id="loading">
+  <table align="center" class="loading-table">
+    <tr>
+      <td><div class="loader"></div></td>
+      <td>Loading videos...</td>
+    </tr>
+  </table>
+</div>
+
+<div id="content">
+  <table id="videoTable" class="videotable" width="100%" cellpadding="3" cellspacing="0">
+    <thead>
+      <tr>
+        <th width="100">Preview</th>
+        <th width="300">Filename</th>
+        <th>Tags</th>
+        <th width="50">Fav</th>
+        <th width="100">Actions</th>
+      </tr>
+    </thead>
+    <tbody id="videoBody">
+      <!-- Rows inserted by JavaScript -->
+    </tbody>
+  </table>
+</div>
+
+<div id="gridContainer">
+</div>
+
+<div id="emptyState" style="display:none;">
+  <table align="center" class="empty-table">
+    <tr>
+      <td><b>No videos found.</b></td>
+    </tr>
+    <tr>
+      <td>Place video files in:<br>
+      <code>C:\Users\R4YY\Desktop\R4Y\Media\Edits</code></td>
+    </tr>
+    <tr>
+      <td><button class="btn" onclick="rescanVideos()">Rescan directory</button></td>
+    </tr>
+  </table>
+</div>
+
+<div id="footer">
+  <span class="footer-text">
+    Edits Viewer &copy; 2024 &nbsp;|&nbsp;
+    <span id="statusText">Ready</span>
+  </span>
+</div>
+
+<!-- Tag input template (hidden) -->
+<div id="tagInputTemplate" style="display:none;">
+  <input type="text" class="tag-input-inline" placeholder="Type tag, Enter to add" maxlength="50">
+</div>
+
+<!-- Hover Preview Player (single reusable element) -->
+<div id="hoverPreview" class="hover-preview" style="display:none;">
+  <div class="hover-preview-inner">
+    <video id="hoverVideo" class="hover-video" muted autoplay playsinline preload="auto"></video>
+  </div>
+</div>
+
+<!-- Floating Player Window -->
+<div id="playerWindow" class="player-window" style="display:none;">
+  <div id="playerTitleBar" class="player-titlebar">
+    <span id="playerTitle" class="player-title-text">Now Playing</span>
+    <button id="playerCloseBtn" class="player-close-btn" title="Close (Esc)">&times;</button>
+  </div>
+  <div class="player-video-wrap">
+    <video id="playerVideo" class="player-video" playsinline preload="auto"></video>
+  </div>
+  <div class="player-controls">
+    <button class="player-btn" id="playerPlayBtn" title="Play/Pause (Space)">&#x25B6;</button>
+    <span class="player-time" id="playerTime">0:00 / 0:00</span>
+    <input type="range" id="playerSeek" class="player-seek" value="0" min="0" max="1000" step="1" title="Seek">
+    <button class="player-btn" id="playerMuteBtn" title="Mute (M)">&#x1F50A;</button>
+    <input type="range" id="playerVolume" class="player-volume" value="100" min="0" max="100" step="1" title="Volume">
+    <button class="player-btn player-btn-fullscreen" id="playerFullscreenBtn" title="Fullscreen (F)">&#x26F6;</button>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

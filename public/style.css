@@ -1,0 +1,826 @@
+/* ============================================================
+   Edits Viewer - 2000s Web Aesthetic Stylesheet
+   ============================================================ */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: "Segoe UI", Tahoma, Verdana, Arial, sans-serif;
+  font-size: 13px;
+  background: #d4d0c8;
+  color: #000;
+  min-height: 100vh;
+}
+
+/* --- Header / Top Bar --- */
+#header {
+  background: linear-gradient(180deg, #4a6ea8 0%, #2d4a7a 50%, #1a3060 100%);
+  border-bottom: 2px solid #000;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+}
+
+.headertable {
+  border-collapse: collapse;
+}
+
+.headertable td {
+  padding: 4px 8px;
+  vertical-align: middle;
+}
+
+.logo {
+  color: #fff;
+  font-family: "Courier New", monospace;
+  font-size: 15px;
+  text-shadow: 1px 1px 2px #000;
+  border-right: 1px solid #5a7eb8;
+}
+
+.logo .version {
+  font-size: 10px;
+  color: #aac;
+}
+
+.searchcell {
+  background: transparent;
+}
+
+.searchcell form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#searchInput {
+  font-family: "Courier New", monospace;
+  font-size: 13px;
+  padding: 3px 6px;
+  border: 2px inset #666;
+  background: #f0f0e8;
+  color: #000;
+  width: 260px;
+  outline: none;
+}
+
+#searchInput:focus {
+  background: #fff;
+  border-color: #90a0ff;
+}
+
+.fav-filter-label {
+  color: #ddd;
+  font-size: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  white-space: nowrap;
+}
+
+.fav-filter-label input[type="checkbox"] {
+  cursor: pointer;
+}
+
+.result-count {
+  color: #bcd;
+  font-size: 11px;
+  font-family: "Courier New", monospace;
+  white-space: nowrap;
+}
+
+.actioncell {
+  border-left: 1px solid #5a7eb8;
+}
+
+/* --- Buttons (Beveled 2000s Style) --- */
+.btn {
+  font-family: Tahoma, Verdana, Arial, sans-serif;
+  font-size: 12px;
+  padding: 3px 10px;
+  background: linear-gradient(180deg, #f0f0e8 0%, #d4d0c8 50%, #b8b4ac 100%);
+  border: 2px outset #666;
+  color: #000;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.btn:hover {
+  background: linear-gradient(180deg, #fff 0%, #e0dcd4 50%, #c8c4bc 100%);
+}
+
+.btn:active {
+  border-style: inset;
+  background: linear-gradient(180deg, #b8b4ac 0%, #d4d0c8 50%, #f0f0e8 100%);
+}
+
+.btn-small {
+  font-size: 11px;
+  padding: 1px 6px;
+}
+
+.btn-del {
+  background: linear-gradient(180deg, #e8a0a0 0%, #c86060 50%, #a04040 100%);
+  color: #fff;
+  border-color: #800;
+}
+
+.btn-del:hover {
+  background: linear-gradient(180deg, #f0b0b0 0%, #d87070 50%, #b05050 100%);
+}
+
+.btn-del:active {
+  border-style: inset;
+}
+
+.btn-fav {
+  font-size: 16px;
+  padding: 1px 4px;
+  line-height: 1;
+  background: transparent;
+  border: 1px solid #999;
+  cursor: pointer;
+}
+
+.btn-fav.active {
+  color: #f80;
+  border-color: #f80;
+  background: linear-gradient(180deg, #fff8e0 0%, #ffe0a0 100%);
+}
+
+.btn-fav.inactive {
+  color: #666;
+}
+
+.btn-fav:hover {
+  background: linear-gradient(180deg, #fff 0%, #eee 100%);
+}
+
+/* --- Loading State --- */
+#loading {
+  padding: 40px;
+  text-align: center;
+}
+
+.loading-table {
+  background: #fff;
+  border: 2px solid #000;
+  padding: 12px;
+}
+
+.loader {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid #666;
+  border-top: 2px solid #4a6ea8;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin-right: 6px;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* --- Video Table --- */
+#content {
+  padding: 8px;
+}
+
+.videotable {
+  border-collapse: collapse;
+  background: #fff;
+  border: 2px solid #000;
+  table-layout: fixed;
+}
+
+.videotable thead th {
+  background: linear-gradient(180deg, #e0dcd4 0%, #c8c4bc 50%, #b0aca4 100%);
+  border: 1px solid #666;
+  border-bottom: 2px solid #000;
+  font-family: "Courier New", monospace;
+  font-size: 11px;
+  text-transform: uppercase;
+  color: #333;
+  padding: 4px 6px;
+  text-align: left;
+  position: sticky;
+  top: 36px;
+  z-index: 10;
+}
+
+.videotable tbody tr {
+  border-bottom: 1px solid #ccc;
+}
+
+.videotable tbody tr:nth-child(even) {
+  background: #f4f0ec;
+}
+
+.videotable tbody tr:hover {
+  background: #e0e8f8;
+}
+
+.videotable td {
+  border: 1px solid #ccc;
+  padding: 4px 6px;
+  vertical-align: middle;
+  overflow: hidden;
+}
+
+/* --- Thumbnail Cell --- */
+.thumb-cell {
+  width: 100px;
+  height: 64px;
+  text-align: center;
+  vertical-align: middle;
+  padding: 2px;
+}
+
+.thumb-cell img {
+  display: block;
+  max-width: 96px;
+  max-height: 60px;
+  border: 1px solid #999;
+  margin: 0 auto;
+}
+
+.thumb-placeholder {
+  width: 96px;
+  height: 54px;
+  background: linear-gradient(135deg, #333 0%, #555 50%, #444 100%);
+  border: 1px solid #666;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  color: #999;
+  font-family: "Courier New", monospace;
+}
+
+/* --- Filename Cell (editable) --- */
+.filename-cell {
+  font-family: "Courier New", monospace;
+  font-size: 12px;
+  cursor: pointer;
+  word-break: break-all;
+}
+
+.filename-cell:hover {
+  background: #ffffd0;
+}
+
+.filename-edit {
+  font-family: "Courier New", monospace;
+  font-size: 12px;
+  width: 100%;
+  padding: 1px 3px;
+  border: 2px inset #666;
+  background: #fff;
+  outline: none;
+}
+
+/* --- Tags Cell --- */
+.tags-cell {
+  cursor: pointer;
+  min-height: 24px;
+}
+
+.tags-cell:hover {
+  background: #ffffd0;
+}
+
+.tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  align-items: center;
+}
+
+.tag-badge {
+  display: inline-block;
+  background: linear-gradient(180deg, #e8e0d0 0%, #d0c8b8 100%);
+  border: 1px solid #888;
+  border-radius: 0;
+  font-family: "Courier New", monospace;
+  font-size: 10px;
+  padding: 1px 5px;
+  white-space: nowrap;
+}
+
+.tag-badge .tag-remove {
+  margin-left: 3px;
+  color: #800;
+  cursor: pointer;
+  font-weight: bold;
+  font-size: 11px;
+  text-decoration: none;
+}
+
+.tag-badge .tag-remove:hover {
+  color: #f00;
+}
+
+.add-tag-btn {
+  font-size: 14px;
+  color: #888;
+  cursor: pointer;
+  padding: 0 3px;
+  font-weight: bold;
+}
+
+.add-tag-btn:hover {
+  color: #000;
+}
+
+.tag-input-inline {
+  font-family: "Courier New", monospace;
+  font-size: 11px;
+  padding: 1px 3px;
+  border: 2px inset #666;
+  background: #fff;
+  width: 120px;
+  outline: none;
+}
+
+/* --- Favorite Cell --- */
+.fav-cell {
+  text-align: center;
+  vertical-align: middle;
+}
+
+/* --- Actions Cell --- */
+.actions-cell {
+  text-align: center;
+  white-space: nowrap;
+}
+
+.actions-cell .btn {
+  margin: 0 1px;
+}
+
+/* --- Empty State --- */
+#emptyState {
+  padding: 40px;
+}
+
+.empty-table {
+  background: #fff;
+  border: 2px solid #000;
+  padding: 20px;
+  text-align: center;
+}
+
+.empty-table td {
+  padding: 6px 20px;
+}
+
+.empty-table code {
+  font-family: "Courier New", monospace;
+  font-size: 12px;
+  background: #f0f0e8;
+  border: 1px solid #ccc;
+  padding: 2px 6px;
+}
+
+/* --- Footer --- */
+#footer {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: linear-gradient(180deg, #c0bca8 0%, #a8a494 100%);
+  border-top: 2px solid #000;
+  padding: 3px 12px;
+  z-index: 100;
+}
+
+.footer-text {
+  font-family: "Courier New", monospace;
+  font-size: 10px;
+  color: #333;
+}
+
+/* --- Notifications --- */
+.notification {
+  position: fixed;
+  top: 50px;
+  right: 16px;
+  background: #fff8d0;
+  border: 2px solid #888;
+  padding: 8px 14px;
+  font-family: "Courier New", monospace;
+  font-size: 12px;
+  z-index: 200;
+  box-shadow: 2px 2px 6px rgba(0,0,0,0.3);
+  max-width: 300px;
+}
+
+.notification.error {
+  background: #f8d0d0;
+  border-color: #800;
+}
+
+.notification.fade {
+  opacity: 0;
+  transition: opacity 0.5s ease-out;
+}
+
+/* --- Scrollbar (retro styled) --- */
+::-webkit-scrollbar {
+  width: 14px;
+}
+
+::-webkit-scrollbar-track {
+  background: #c0bca8;
+  border-left: 1px solid #888;
+}
+
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #d4d0c8 0%, #a8a494 100%);
+  border: 1px solid #666;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #e0dcd4 0%, #b8b4ac 100%);
+}
+
+/* --- Confirmation Dialog --- */
+.confirm-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0,0,0,0.5);
+  z-index: 300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.confirm-box {
+  background: #f0ece4;
+  border: 3px outset #888;
+  padding: 16px 20px;
+  max-width: 400px;
+  box-shadow: 4px 4px 12px rgba(0,0,0,0.4);
+}
+
+.confirm-box h3 {
+  font-family: "Courier New", monospace;
+  font-size: 14px;
+  margin-bottom: 8px;
+  color: #800;
+}
+
+.confirm-box p {
+  font-size: 13px;
+  margin-bottom: 12px;
+  word-break: break-all;
+}
+
+.confirm-box .btn-group {
+  text-align: right;
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+/* ============================================================
+   Hover Preview Player
+   ============================================================ */
+
+.hover-preview {
+  position: fixed;
+  z-index: 500;
+  width: 320px;
+  background: #000;
+  border: 2px solid #666;
+  box-shadow: 4px 4px 12px rgba(0,0,0,0.5);
+  pointer-events: none;
+}
+
+.hover-preview-inner {
+  position: relative;
+  width: 100%;
+  padding-top: 56.25%; /* 16:9 aspect ratio */
+  background: #111;
+}
+
+.hover-video {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  background: #000;
+}
+
+/* ============================================================
+   Floating Player Window
+   ============================================================ */
+
+.player-window {
+  position: fixed;
+  z-index: 600;
+  width: 640px;
+  height: 420px;
+  background: #1a1a1a;
+  border: 2px outset #888;
+  box-shadow: 6px 6px 16px rgba(0,0,0,0.5);
+  display: flex;
+  flex-direction: column;
+  top: 80px;
+  left: 80px;
+  resize: both;
+  overflow: hidden;
+  min-width: 320px;
+  min-height: 240px;
+}
+
+.player-titlebar {
+  background: linear-gradient(180deg, #2d4a7a 0%, #1a3060 100%);
+  border-bottom: 1px solid #000;
+  padding: 3px 6px;
+  display: flex;
+  align-items: center;
+  cursor: move;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.player-title-text {
+  flex: 1;
+  font-family: "Courier New", monospace;
+  font-size: 12px;
+  color: #fff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.player-close-btn {
+  background: linear-gradient(180deg, #c86060 0%, #a04040 100%);
+  border: 1px outset #800;
+  color: #fff;
+  font-size: 14px;
+  font-weight: bold;
+  width: 22px;
+  height: 20px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.player-close-btn:hover {
+  background: linear-gradient(180deg, #d87070 0%, #b05050 100%);
+}
+
+.player-close-btn:active {
+  border-style: inset;
+}
+
+.player-video-wrap {
+  flex: 1;
+  background: #000;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+}
+
+.player-video {
+  width: 100%;
+  height: 100%;
+  display: block;
+  background: #000;
+  object-fit: contain;
+}
+
+/* --- Controls Bar --- */
+.player-controls {
+  background: linear-gradient(180deg, #2a2a2a 0%, #1a1a1a 100%);
+  border-top: 1px solid #444;
+  padding: 4px 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.player-btn {
+  background: linear-gradient(180deg, #444 0%, #333 100%);
+  border: 1px outset #555;
+  color: #ddd;
+  font-size: 13px;
+  padding: 2px 8px;
+  cursor: pointer;
+  line-height: 1.4;
+  font-family: Tahoma, Arial, sans-serif;
+  flex-shrink: 0;
+}
+
+.player-btn:hover {
+  background: linear-gradient(180deg, #555 0%, #444 100%);
+  color: #fff;
+}
+
+.player-btn:active {
+  border-style: inset;
+}
+
+.player-btn-fullscreen {
+  margin-left: auto;
+}
+
+.player-time {
+  font-family: "Courier New", monospace;
+  font-size: 11px;
+  color: #aaa;
+  white-space: nowrap;
+  flex-shrink: 0;
+  min-width: 80px;
+  text-align: center;
+}
+
+.player-seek {
+  flex: 1;
+  min-width: 40px;
+  height: 6px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: #444;
+  border: 1px inset #333;
+  outline: none;
+  cursor: pointer;
+}
+
+.player-seek::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  background: linear-gradient(180deg, #888 0%, #666 100%);
+  border: 1px outset #999;
+  cursor: pointer;
+}
+
+.player-volume {
+  width: 60px;
+  height: 6px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: #444;
+  border: 1px inset #333;
+  outline: none;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.player-volume::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 10px;
+  height: 10px;
+  background: linear-gradient(180deg, #888 0%, #666 100%);
+  border: 1px outset #999;
+  cursor: pointer;
+}
+
+/* ============================================================
+   View Toggle
+   ============================================================ */
+
+.view-toggle {
+  display: inline-flex;
+  gap: 2px;
+  margin-left: 6px;
+}
+
+.view-btn {
+  font-size: 14px;
+  line-height: 1;
+  padding: 1px 5px;
+  opacity: 0.5;
+}
+
+.view-btn.active {
+  opacity: 1;
+  border-style: inset;
+  background: linear-gradient(180deg, #b8b4ac 0%, #d4d0c8 50%, #f0f0e8 100%);
+}
+
+/* ============================================================
+   Grid View
+   ============================================================ */
+
+#gridContainer {
+  display: none;
+  padding: 8px;
+}
+
+.video-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+  padding: 4px;
+}
+
+.video-card {
+  background: #fff;
+  border: 2px solid #000;
+  overflow: hidden;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.video-card:hover {
+  background: #e0e8f8;
+  border-color: #4a6ea8;
+}
+
+.video-card .card-thumb {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: #222;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-bottom: 1px solid #000;
+}
+
+.video-card .card-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.video-card .card-thumb .thumb-placeholder {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  border: none;
+  border-radius: 0;
+}
+
+.video-card .card-body {
+  padding: 4px 6px;
+}
+
+.video-card .card-filename {
+  font-family: "Courier New", monospace;
+  font-size: 11px;
+  color: #000;
+  word-break: break-all;
+  display: block;
+  margin-bottom: 2px;
+}
+
+.video-card .card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin-bottom: 2px;
+}
+
+.video-card .card-tags .tag-badge {
+  font-size: 9px;
+  padding: 0 3px;
+}
+
+.video-card .card-fav {
+  font-size: 14px;
+  color: #666;
+}
+
+.video-card .card-fav.active {
+  color: #f80;
+}
+
+/* Resize handle indicator */
+.player-window::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 14px;
+  height: 14px;
+  background: linear-gradient(135deg, transparent 50%, #666 50%, #888 75%, transparent 75%);
+  pointer-events: none;
+}

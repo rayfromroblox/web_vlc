@@ -1,0 +1,13 @@
+{
+  "name": "edits-viewer",
+  "version": "1.0.0",
+  "description": "Local video edits manager with 2000s web aesthetic",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.10.0",
+    "express": "^4.21.0"
+  }
+}
