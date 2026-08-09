@@ -1,274 +1,333 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
-const { execFile, exec, execFileSync } = require('child_process');
+const { execFile, execFileSync } = require('child_process');
 const db = require('./db');
+const {
+  HOST,
+  MEDIA_DIR,
+  MIME_TYPES,
+  PORT,
+  PUBLIC_DIR,
+  THUMBNAILS_DIR,
+  VIDEO_EXTENSIONS,
+  isPathInsideMediaDir,
+  thumbnailPathFor
+} = require('./config');
 
 const app = express();
-const PORT = 4000;
 
-// --- Configuration ---
-const EDITS_DIR = 'C:\\Users\\R4YY\\Desktop\\R4Y\\Media\\Edits';
-const THUMBNAILS_DIR = path.join(__dirname, 'thumbnails');
-const PUBLIC_DIR = path.join(__dirname, 'public');
+fs.mkdirSync(THUMBNAILS_DIR, { recursive: true });
 
-// --- Ensure directories exist ---
-if (!fs.existsSync(THUMBNAILS_DIR)) {
-  fs.mkdirSync(THUMBNAILS_DIR, { recursive: true });
-}
-
-// Check if ffmpeg is available
 let ffmpegAvailable = false;
 try {
-  execFileSync('where', ['ffmpeg'], { encoding: 'utf8', stdio: 'pipe' });
+  execFileSync('ffmpeg', ['-version'], { encoding: 'utf8', stdio: 'pipe', timeout: 5000 });
   ffmpegAvailable = true;
 } catch {
   ffmpegAvailable = false;
 }
 
-// --- Middleware ---
-app.use(express.json());
-app.use(express.static(PUBLIC_DIR));
-app.use('/thumbnails', express.static(THUMBNAILS_DIR));
+app.disable('x-powered-by');
+app.use(express.json({ limit: '32kb' }));
+app.use(express.static(PUBLIC_DIR, { etag: true, maxAge: 0 }));
 
-// --- Initialize database ---
 db.initDb();
 
-// Run initial scan on startup
-console.log('[STARTUP] Running initial scan...');
-const scanResult = db.scanDirectory();
-console.log('[STARTUP] Scan result:', JSON.stringify(scanResult));
-
-// --- Helper: safe path ---
-function isPathSafe(targetPath) {
-  const resolved = path.resolve(targetPath);
-  const editsDir = path.resolve(EDITS_DIR);
-  return resolved.startsWith(editsDir);
+function parseTags(value) {
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
 }
 
-// --- MIME types ---
-const MIME_TYPES = {
-  '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.avi': 'video/x-msvideo',
-  '.mkv': 'video/x-matroska', '.webm': 'video/webm', '.wmv': 'video/x-ms-wmv',
-  '.flv': 'video/x-flv', '.m4v': 'video/mp4', '.mpg': 'video/mpeg', '.mpeg': 'video/mpeg'
-};
+function mediaDirectoryAvailable() {
+  try {
+    return fs.statSync(MEDIA_DIR).isDirectory();
+  } catch {
+    return false;
+  }
+}
 
-// --- Thumbnail generation ---
-function generateThumbnail(filename, callback) {
-  if (!ffmpegAvailable) { if (callback) callback(null); return; }
+function displayPath(value) {
+  const normalized = value.replaceAll('\\', '/');
+  return normalized.split('/').filter(Boolean).pop() || value;
+}
 
-  const inputPath = path.join(EDITS_DIR, filename);
-  const thumbName = filename.replace(/\.[^.]+$/, '.jpg');
-  const outputPath = path.join(THUMBNAILS_DIR, thumbName);
+function mediaDetails(video) {
+  const extension = path.extname(video.filename).toLowerCase();
+  const thumbnailPath = thumbnailPathFor(video.filename);
+  let stat = null;
+  const safe = isPathInsideMediaDir(video.full_path);
+  if (safe) {
+    try {
+      stat = fs.statSync(video.full_path);
+    } catch {
+      stat = null;
+    }
+  }
 
-  if (!fs.existsSync(inputPath)) { if (callback) callback(null); return; }
-  if (fs.existsSync(outputPath)) { if (callback) callback(outputPath); return; }
+  return {
+    id: video.id,
+    filename: video.filename,
+    tags: parseTags(video.tags),
+    favorite: Boolean(video.favorite),
+    hasThumbnail: VIDEO_EXTENSIONS.has(extension) && fs.existsSync(thumbnailPath),
+    mediaType: VIDEO_EXTENSIONS.has(extension) ? 'video' : 'audio',
+    extension: extension.slice(1),
+    size: stat?.size || 0,
+    modifiedAt: stat?.mtime?.toISOString() || video.created_at || video.last_seen,
+    lastSeen: video.last_seen,
+    available: Boolean(stat?.isFile())
+  };
+}
+
+function generateThumbnail(video, callback) {
+  const extension = path.extname(video.filename).toLowerCase();
+  if (!ffmpegAvailable || !VIDEO_EXTENSIONS.has(extension)) return callback(null);
+  if (!isPathInsideMediaDir(video.full_path) || !fs.existsSync(video.full_path)) return callback(null);
+
+  const outputPath = thumbnailPathFor(video.filename);
+  if (fs.existsSync(outputPath)) return callback(outputPath);
 
   execFile('ffmpeg', [
-    '-i', inputPath, '-ss', '00:00:01', '-vframes', '1',
-    '-vf', 'scale=320:-1', '-q:v', '5', '-y', outputPath
-  ], { timeout: 30000 }, (err) => {
-    if (err) { console.error('FFmpeg error for', filename, ':', err.message); if (callback) callback(null); return; }
-    if (callback) callback(outputPath);
+    '-hide_banner', '-loglevel', 'error',
+    '-ss', '00:00:01', '-i', video.full_path,
+    '-frames:v', '1', '-vf', 'scale=640:-2',
+    '-q:v', '5', '-y', outputPath
+  ], { timeout: 45000 }, (error) => {
+    if (error) {
+      console.warn(`[thumbnail] ${video.filename}:`, error.message);
+      callback(null);
+      return;
+    }
+    callback(outputPath);
   });
 }
 
-// ============================================================
-//   API ROUTES — All ID-based for stable identity
-// ============================================================
+app.get('/health', (req, res) => {
+  res.json({
+    ok: true,
+    app: 'web_vlc',
+    libraryAvailable: mediaDirectoryAvailable(),
+    ffmpegAvailable
+  });
+});
 
-// GET /videos — List all active videos from DB
 app.get('/videos', (req, res) => {
   try {
-    // Rescan in background so we're always in sync
-    db.scanDirectory();
-
-    const videos = db.getAllActiveVideos();
-    const result = videos.map(v => ({
-      id: v.id,
-      filename: v.filename,
-      tags: (() => { try { return JSON.parse(v.tags); } catch { return []; } })(),
-      favorite: !!v.favorite,
-      hasThumbnail: v.thumbnail_path ? fs.existsSync(v.thumbnail_path) : false
-    }));
-
-    res.json({ videos: result });
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to list videos', details: err.message });
+    const scan = db.scanDirectory();
+    const videos = db.getAllActiveVideos().map(mediaDetails);
+    res.json({
+      videos,
+      library: {
+        path: MEDIA_DIR,
+        displayPath: displayPath(MEDIA_DIR),
+        available: mediaDirectoryAvailable(),
+        ffmpegAvailable
+      },
+      scan
+    });
+  } catch (error) {
+    console.error('[videos]', error);
+    res.status(500).json({ error: 'Failed to load the media library' });
   }
 });
 
-// GET /video/:id — Stream video by database ID
 app.get('/video/:id', (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  if (isNaN(id)) return res.status(400).json({ error: 'Invalid ID' });
+  const id = Number.parseInt(req.params.id, 10);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: 'Invalid media ID' });
 
   const video = db.getVideoById(id);
-  if (!video) return res.status(404).json({ error: 'Video not found' });
+  if (!video) return res.status(404).json({ error: 'Media not found' });
+  if (!isPathInsideMediaDir(video.full_path)) return res.status(403).json({ error: 'Media is outside the configured library' });
 
-  const filePath = video.full_path;
-  console.log('[VIDEO] ID:', id, '→', filePath);
+  let stat;
+  try {
+    stat = fs.statSync(video.full_path);
+  } catch {
+    return res.status(404).json({ error: 'Media file is offline' });
+  }
+  if (!stat.isFile()) return res.status(404).json({ error: 'Media file is offline' });
 
-  if (!isPathSafe(filePath)) return res.status(403).json({ error: 'Path traversal detected' });
-  if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'File not found on disk' });
-
-  const stat = fs.statSync(filePath);
   const fileSize = stat.size;
+  const extension = path.extname(video.full_path).toLowerCase();
+  const mimeType = MIME_TYPES[extension] || 'application/octet-stream';
   const range = req.headers.range;
-  const ext = path.extname(filePath).toLowerCase();
-  const mimeType = MIME_TYPES[ext] || 'video/mp4';
 
   res.setHeader('Accept-Ranges', 'bytes');
   res.setHeader('Content-Type', mimeType);
+  res.setHeader('Cache-Control', 'private, max-age=0, must-revalidate');
 
-  if (range) {
-    const parts = range.replace(/bytes=/, '').split('-');
-    const start = parseInt(parts[0], 10);
-    const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
-    const chunkSize = (end - start) + 1;
-
-    if (start >= fileSize || end >= fileSize) {
-      res.status(416).setHeader('Content-Range', `bytes */${fileSize}`);
-      return res.end();
-    }
-
-    const stream = fs.createReadStream(filePath, { start, end });
-    res.status(206);
-    res.setHeader('Content-Range', `bytes ${start}-${end}/${fileSize}`);
-    res.setHeader('Content-Length', chunkSize);
-    stream.pipe(res);
-  } else {
+  if (!range) {
     res.setHeader('Content-Length', fileSize);
-    fs.createReadStream(filePath).pipe(res);
+    const stream = fs.createReadStream(video.full_path);
+    stream.on('error', () => { if (!res.headersSent) res.sendStatus(500); else res.destroy(); });
+    req.on('close', () => stream.destroy());
+    stream.pipe(res);
+    return;
   }
+
+  const match = /^bytes=(\d*)-(\d*)$/.exec(range.trim());
+  if (!match) {
+    res.setHeader('Content-Range', `bytes */${fileSize}`);
+    return res.sendStatus(416);
+  }
+
+  let start = match[1] ? Number.parseInt(match[1], 10) : 0;
+  let end = match[2] ? Number.parseInt(match[2], 10) : fileSize - 1;
+  if (!match[1] && match[2]) {
+    const suffixLength = Number.parseInt(match[2], 10);
+    start = Math.max(0, fileSize - suffixLength);
+    end = fileSize - 1;
+  }
+
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end < start || start >= fileSize) {
+    res.setHeader('Content-Range', `bytes */${fileSize}`);
+    return res.sendStatus(416);
+  }
+  end = Math.min(end, fileSize - 1);
+
+  res.status(206);
+  res.setHeader('Content-Range', `bytes ${start}-${end}/${fileSize}`);
+  res.setHeader('Content-Length', end - start + 1);
+  const stream = fs.createReadStream(video.full_path, { start, end });
+  stream.on('error', () => res.destroy());
+  req.on('close', () => stream.destroy());
+  stream.pipe(res);
 });
 
-// GET /thumbnail/:id — Serve thumbnail by video ID
 app.get('/thumbnail/:id', (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  if (isNaN(id)) return res.status(400).json({ error: 'Invalid ID' });
+  const id = Number.parseInt(req.params.id, 10);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: 'Invalid media ID' });
 
   const video = db.getVideoById(id);
-  if (!video) return res.status(404).json({ error: 'Video not found' });
+  if (!video) return res.status(404).json({ error: 'Media not found' });
+  const extension = path.extname(video.filename).toLowerCase();
+  if (!VIDEO_EXTENSIONS.has(extension)) return res.status(404).json({ error: 'Audio items do not have video thumbnails' });
 
-  const thumbName = video.filename.replace(/\.[^.]+$/, '.jpg');
-  const thumbPath = path.join(THUMBNAILS_DIR, thumbName);
+  const thumbnailPath = thumbnailPathFor(video.filename);
+  const sendThumbnail = (filePath) => {
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.sendFile(filePath);
+  };
 
-  if (fs.existsSync(thumbPath)) return res.sendFile(thumbPath);
-
-  // Generate on demand
-  if (ffmpegAvailable) {
-    generateThumbnail(video.filename, (generatedPath) => {
-      if (generatedPath && fs.existsSync(generatedPath)) {
-        res.sendFile(generatedPath);
-      } else {
-        res.status(404).json({ error: 'Thumbnail not available' });
-      }
-    });
-  } else {
-    res.status(404).json({ error: 'Thumbnail generation unavailable' });
-  }
+  if (fs.existsSync(thumbnailPath)) return sendThumbnail(thumbnailPath);
+  generateThumbnail(video, (generatedPath) => {
+    if (!generatedPath || !fs.existsSync(generatedPath)) return res.status(404).json({ error: 'Thumbnail unavailable' });
+    sendThumbnail(generatedPath);
+  });
 });
 
-// POST /rename/:id — Rename file on disk + update DB
 app.post('/rename/:id', (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  const { newName } = req.body;
-  if (isNaN(id)) return res.status(400).json({ error: 'Invalid ID' });
-  if (!newName) return res.status(400).json({ error: 'Missing newName' });
+  const id = Number.parseInt(req.params.id, 10);
+  const newName = typeof req.body?.newName === 'string' ? req.body.newName.trim() : '';
+  if (!Number.isInteger(id)) return res.status(400).json({ error: 'Invalid media ID' });
+  if (!newName || newName.length > 255) return res.status(400).json({ error: 'Invalid filename' });
 
   const result = db.updateFilename(id, newName);
   if (result.error) return res.status(400).json(result);
   res.json(result);
 });
 
-// POST /delete/:id — Delete file from disk + soft-delete in DB
 app.post('/delete/:id', (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  if (isNaN(id)) return res.status(400).json({ error: 'Invalid ID' });
-
+  const id = Number.parseInt(req.params.id, 10);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: 'Invalid media ID' });
   const result = db.deleteVideo(id);
-  if (result.error) return res.status(500).json(result);
+  if (result.error) return res.status(400).json(result);
   res.json(result);
 });
 
-// POST /favorite/:id — Toggle favorite
 app.post('/favorite/:id', (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  if (isNaN(id)) return res.status(400).json({ error: 'Invalid ID' });
-
+  const id = Number.parseInt(req.params.id, 10);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: 'Invalid media ID' });
   const result = db.toggleFavorite(id);
-  if (!result) return res.status(404).json({ error: 'Video not found' });
+  if (!result) return res.status(404).json({ error: 'Media not found' });
   res.json(result);
 });
 
-// POST /tags/:id — Add/remove tags
 app.post('/tags/:id', (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  const { action, tag } = req.body;
-  console.log('[TAG API] request', { id, action, tag });
-  if (isNaN(id)) {
-    console.log('[TAG API] invalid ID');
-    return res.status(400).json({ error: 'Invalid ID' });
+  const id = Number.parseInt(req.params.id, 10);
+  const action = req.body?.action;
+  const tag = typeof req.body?.tag === 'string' ? req.body.tag.trim() : '';
+  if (!Number.isInteger(id)) return res.status(400).json({ error: 'Invalid media ID' });
+  if (!['add', 'remove'].includes(action) || !tag || tag.length > 50) {
+    return res.status(400).json({ error: 'Invalid tag update' });
   }
-  if (!action || !tag) {
-    console.log('[TAG API] missing fields');
-    return res.status(400).json({ error: 'Missing action or tag' });
-  }
-
-  // Log existing tags before mutation
-  const video = db.getVideoById(id);
-  let existingTags = [];
-  if (video) {
-    try { existingTags = JSON.parse(video.tags); } catch { existingTags = []; }
-  }
-  console.log('[TAG API] before', existingTags);
 
   const result = db.updateTags(id, action, tag);
-  if (!result) {
-    console.log('[TAG API] video not found');
-    return res.status(404).json({ success: false, error: 'Video not found' });
-  }
-  console.log('[TAG API] response', result);
+  if (!result) return res.status(404).json({ error: 'Media not found' });
   res.json(result);
 });
 
-// POST /open/:id — Open video in default system player (VLC fallback)
-app.post('/open/:id', (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  if (isNaN(id)) return res.status(400).json({ error: 'Invalid ID' });
+function openDesktopFile(filePath, callback) {
+  if (process.platform === 'win32') {
+    execFile('cmd.exe', ['/d', '/s', '/c', 'start', '', filePath], callback);
+  } else if (process.platform === 'darwin') {
+    execFile('open', [filePath], callback);
+  } else {
+    execFile('xdg-open', [filePath], callback);
+  }
+}
 
-  const result = db.openInVLC(id);
+app.post('/open/:id', (req, res) => {
+  const id = Number.parseInt(req.params.id, 10);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: 'Invalid media ID' });
+  const result = db.openInDesktop(id);
   if (result.error) return res.status(404).json(result);
 
-  exec(`start "" "${result.fullPath}"`, (err) => {
-    if (err) return res.status(500).json({ error: 'Failed to open file', details: err.message });
+  openDesktopFile(result.fullPath, (error) => {
+    if (error) return res.status(500).json({ error: 'Failed to open the desktop player' });
     res.json({ success: true });
   });
 });
 
-// POST /scan — Rescan directory (manual trigger)
 app.post('/scan', (req, res) => {
   try {
     const result = db.scanDirectory();
-    // Also generate thumbnails lazily
-    const videos = db.getAllActiveVideos();
-    for (const v of videos) {
-      const thumbName = v.filename.replace(/\.[^.]+$/, '.jpg');
-      const thumbPath = path.join(THUMBNAILS_DIR, thumbName);
-      if (!fs.existsSync(thumbPath) && ffmpegAvailable) {
-        generateThumbnail(v.filename, () => {});
-      }
+    if (result.available && ffmpegAvailable) {
+      db.getAllActiveVideos().forEach((video) => {
+        const extension = path.extname(video.filename).toLowerCase();
+        if (VIDEO_EXTENSIONS.has(extension) && !fs.existsSync(thumbnailPathFor(video.filename))) {
+          generateThumbnail(video, () => {});
+        }
+      });
     }
-    res.json({ success: true, message: 'Scan completed', ...result });
-  } catch (err) {
-    res.status(500).json({ error: 'Scan failed', details: err.message });
+    res.json({ success: true, ...result });
+  } catch (error) {
+    console.error('[scan]', error);
+    res.status(500).json({ error: 'Scan failed' });
   }
 });
 
-// --- Start server ---
-app.listen(PORT, () => {
-  console.log(`Edits Viewer running at http://localhost:${PORT}`);
-  console.log(`Watching directory: ${EDITS_DIR}`);
-  console.log(`FFmpeg available: ${ffmpegAvailable ? 'Yes' : 'No'}`);
+app.use((error, req, res, next) => {
+  if (res.headersSent) return next(error);
+  console.error('[server]', error);
+  res.status(500).json({ error: 'Unexpected server error' });
 });
+
+function startServer() {
+  const scan = db.scanDirectory();
+  const server = app.listen(PORT, HOST, () => {
+    console.log(`\n  web_vlc is ready → http://${HOST}:${PORT}`);
+    console.log(`  Media folder       → ${MEDIA_DIR}`);
+    console.log(`  Folder connected   → ${scan.available ? 'yes' : 'no'}`);
+    console.log(`  FFmpeg thumbnails  → ${ffmpegAvailable ? 'enabled' : 'unavailable'}\n`);
+  });
+  return server;
+}
+
+if (require.main === module) {
+  const server = startServer();
+  const shutdown = () => {
+    server.close(() => {
+      db.closeDb();
+      process.exit(0);
+    });
+  };
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
+}
+
+module.exports = { app, startServer };

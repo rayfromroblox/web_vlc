@@ -1,13 +1,20 @@
 {
-  "name": "edits-viewer",
-  "version": "1.0.0",
-  "description": "Local video edits manager with 2000s web aesthetic",
+  "name": "web-vlc",
+  "version": "2.0.0",
+  "description": "A private, local-first media library and VLC-inspired player for the browser",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "check": "node --check server.js && node --check db.js && node --check config.js && node --check public/app.js"
+  },
+  "engines": {
+    "node": ">=20"
   },
   "dependencies": {
     "better-sqlite3": "^12.10.0",
     "express": "^4.21.0"
+  },
+  "allowScripts": {
+    "better-sqlite3@12.10.0": true
   }
 }

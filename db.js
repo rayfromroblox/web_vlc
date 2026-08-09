@@ -1,33 +1,34 @@
-// db.js — SQLite database layer (replaces metadata.json)
-// Source of truth for app state. Filesystem is source of media.
-
 const Database = require('better-sqlite3');
-const path = require('path');
 const fs = require('fs');
-
-const DB_PATH = path.join(__dirname, 'edits.db');
-const EDITS_DIR = 'C:\\Users\\R4YY\\Desktop\\R4Y\\Media\\Edits';
-const THUMBNAILS_DIR = path.join(__dirname, 'thumbnails');
+const path = require('path');
+const {
+  DB_PATH,
+  MEDIA_DIR,
+  MEDIA_EXTENSIONS,
+  VIDEO_EXTENSIONS,
+  isPathInsideMediaDir,
+  thumbnailPathFor
+} = require('./config');
 
 let db;
 
 function initDb() {
+  if (db) return db;
   db = new Database(DB_PATH);
-
-  // Enable WAL mode for concurrent read performance
   db.pragma('journal_mode = WAL');
+  db.pragma('foreign_keys = ON');
+  db.pragma('busy_timeout = 5000');
 
-  // Create tables
   db.exec(`
     CREATE TABLE IF NOT EXISTS videos (
-      id            INTEGER PRIMARY KEY AUTOINCREMENT,
-      filename      TEXT NOT NULL UNIQUE,
-      full_path     TEXT NOT NULL,
-      tags          TEXT NOT NULL DEFAULT '[]',
-      favorite      INTEGER NOT NULL DEFAULT 0,
-      status        TEXT NOT NULL DEFAULT 'active',
-      created_at    TEXT NOT NULL DEFAULT (datetime('now')),
-      last_seen     TEXT NOT NULL DEFAULT (datetime('now')),
+      id             INTEGER PRIMARY KEY AUTOINCREMENT,
+      filename       TEXT NOT NULL UNIQUE,
+      full_path      TEXT NOT NULL,
+      tags           TEXT NOT NULL DEFAULT '[]',
+      favorite       INTEGER NOT NULL DEFAULT 0,
+      status         TEXT NOT NULL DEFAULT 'active',
+      created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+      last_seen      TEXT NOT NULL DEFAULT (datetime('now')),
       thumbnail_path TEXT
     );
 
@@ -36,16 +37,13 @@ function initDb() {
     CREATE INDEX IF NOT EXISTS idx_videos_full_path ON videos(full_path);
   `);
 
-  console.log('[DB] Initialized:', DB_PATH);
+  console.log('[db] Ready:', DB_PATH);
   return db;
 }
 
 function getDb() {
-  if (!db) return initDb();
-  return db;
+  return db || initDb();
 }
-
-// --- Video lookup helpers ---
 
 function getVideoById(id) {
   return getDb().prepare('SELECT * FROM videos WHERE id = ? AND status = ?').get(id, 'active');
@@ -56,195 +54,188 @@ function getVideoByFilename(filename) {
 }
 
 function getAllActiveVideos() {
-  return getDb().prepare(
-    'SELECT id, filename, tags, favorite, thumbnail_path, last_seen FROM videos WHERE status = ? ORDER BY filename COLLATE NOCASE'
-  ).all('active');
+  return getDb().prepare(`
+    SELECT id, filename, full_path, tags, favorite, thumbnail_path, created_at, last_seen
+    FROM videos
+    WHERE status = ?
+    ORDER BY filename COLLATE NOCASE
+  `).all('active');
 }
 
-// --- Scanner: sync filesystem → database ---
-
-const VIDEO_EXTS = new Set([
-  '.mp4', '.mov', '.avi', '.mkv', '.webm',
-  '.wmv', '.flv', '.m4v', '.mpg', '.mpeg'
-]);
-
 function scanDirectory() {
-  const db = getDb();
-  const foundPaths = new Set();
-  const inserted = [];
-  const updated = [];
-
+  const database = getDb();
   let entries;
+
   try {
-    entries = fs.readdirSync(EDITS_DIR, { withFileTypes: true });
-  } catch (err) {
-    console.error('[SCAN] Failed to read directory:', err.message);
-    return { inserted: 0, updated: 0, markedMissing: 0 };
+    entries = fs.readdirSync(MEDIA_DIR, { withFileTypes: true });
+  } catch (error) {
+    console.warn('[scan] Media folder unavailable:', error.message);
+    return {
+      available: false,
+      inserted: 0,
+      updated: 0,
+      markedMissing: 0,
+      error: error.message
+    };
   }
 
-  const insertStmt = db.prepare(`
+  const foundPaths = new Set();
+  const existingByName = new Map(
+    database.prepare('SELECT id, filename, full_path, status FROM videos').all().map((item) => [item.filename, item])
+  );
+  const upsert = database.prepare(`
     INSERT INTO videos (filename, full_path, tags, favorite, status, last_seen, thumbnail_path)
     VALUES (?, ?, '[]', 0, 'active', datetime('now'), ?)
     ON CONFLICT(filename) DO UPDATE SET
       full_path = excluded.full_path,
       last_seen = datetime('now'),
-      status = 'active'
+      status = 'active',
+      thumbnail_path = excluded.thumbnail_path
   `);
+  const markMissing = database.prepare('UPDATE videos SET status = ? WHERE id = ?');
 
-  const transaction = db.transaction(() => {
+  const result = database.transaction(() => {
+    let inserted = 0;
+    let updated = 0;
+
     for (const entry of entries) {
       if (!entry.isFile()) continue;
-      const ext = path.extname(entry.name).toLowerCase();
-      if (!VIDEO_EXTS.has(ext)) continue;
+      const extension = path.extname(entry.name).toLowerCase();
+      if (!MEDIA_EXTENSIONS.has(extension)) continue;
 
-      const fullPath = path.join(EDITS_DIR, entry.name);
+      const fullPath = path.join(MEDIA_DIR, entry.name);
       foundPaths.add(fullPath);
+      const thumbnailPath = VIDEO_EXTENSIONS.has(extension) && fs.existsSync(thumbnailPathFor(entry.name))
+        ? thumbnailPathFor(entry.name)
+        : null;
+      const existing = existingByName.get(entry.name);
 
-      // Determine thumbnail path
-      const thumbName = entry.name.replace(/\.[^.]+$/, '.jpg');
-      const thumbPath = path.join(THUMBNAILS_DIR, thumbName);
-      const thumbnailExists = fs.existsSync(thumbPath) ? thumbPath : null;
+      upsert.run(entry.name, fullPath, thumbnailPath);
+      if (!existing) inserted += 1;
+      else if (existing.full_path !== fullPath || existing.status !== 'active') updated += 1;
+    }
 
-      const result = insertStmt.run(entry.name, fullPath, thumbnailExists);
-      if (result.changes > 0) {
-        if (result.lastInsertRowid) {
-          inserted.push(entry.name);
-        } else {
-          updated.push(entry.name);
-        }
+    let markedMissing = 0;
+    const activeRows = database.prepare('SELECT id, full_path FROM videos WHERE status = ?').all('active');
+    for (const item of activeRows) {
+      if (!foundPaths.has(item.full_path)) {
+        markedMissing += markMissing.run('missing', item.id).changes;
       }
     }
 
-    // Mark records as missing if their file is no longer on disk
-    const missing = db.prepare(
-      'UPDATE videos SET status = ? WHERE status = ? AND full_path NOT IN (' +
-        Array.from(foundPaths).map(p => `'${p.replace(/'/g, "''")}'`).join(',') +
-      ')'
-    );
-    // Only mark missing if we actually found files (avoid wiping on empty scan)
-    if (foundPaths.size > 0) {
-      const missingCount = missing.run('missing', 'active').changes;
-      return { inserted: inserted.length, updated: updated.length, markedMissing: missingCount };
-    }
-    return { inserted: inserted.length, updated: updated.length, markedMissing: 0 };
-  });
+    return { available: true, inserted, updated, markedMissing };
+  })();
 
-  return transaction();
+  return result;
 }
-
-// --- Metadata update helpers ---
 
 function toggleFavorite(id) {
   const video = getVideoById(id);
   if (!video) return null;
-  const newVal = video.favorite ? 0 : 1;
-  getDb().prepare('UPDATE videos SET favorite = ? WHERE id = ?').run(newVal, id);
-  return { id, favorite: !!newVal };
+  const favorite = video.favorite ? 0 : 1;
+  getDb().prepare('UPDATE videos SET favorite = ? WHERE id = ?').run(favorite, id);
+  return { id, favorite: Boolean(favorite) };
 }
 
-function updateTags(id, action, tag) {
+function updateTags(id, action, rawTag) {
   const video = getVideoById(id);
   if (!video) return null;
 
   let tags;
-  try { tags = JSON.parse(video.tags); } catch { tags = []; }
-
-  if (action === 'add') {
-    const lower = tag.toLowerCase().trim();
-    if (lower && !tags.includes(lower)) tags.push(lower);
-  } else if (action === 'remove') {
-    tags = tags.filter(t => t !== tag);
+  try {
+    tags = JSON.parse(video.tags);
+    if (!Array.isArray(tags)) tags = [];
+  } catch {
+    tags = [];
   }
 
+  const tag = String(rawTag).trim().toLowerCase().slice(0, 50);
+  if (action === 'add' && tag && !tags.includes(tag)) tags.push(tag);
+  if (action === 'remove') tags = tags.filter((item) => item !== tag);
+
   getDb().prepare('UPDATE videos SET tags = ? WHERE id = ?').run(JSON.stringify(tags), id);
-  console.log('[TAG API] after', tags);
   return { success: true, id, tags };
 }
 
 function updateFilename(id, newFilename) {
   const video = getVideoById(id);
-  if (!video) return { error: 'Video not found' };
+  if (!video) return { error: 'Media not found' };
+  if (!isPathInsideMediaDir(video.full_path)) return { error: 'File is outside the configured media folder' };
 
-  const safeNew = path.basename(newFilename);
-  if (!safeNew) return { error: 'Invalid filename' };
+  const safeName = path.basename(String(newFilename).trim());
+  if (!safeName || safeName === '.' || safeName === '..') return { error: 'Invalid filename' };
+  const extension = path.extname(safeName).toLowerCase();
+  if (!MEDIA_EXTENSIONS.has(extension)) return { error: 'Unsupported media extension' };
 
   const oldPath = video.full_path;
-  const dir = path.dirname(oldPath);
-  const newPath = path.join(dir, safeNew);
-
-  if (oldPath === newPath) return { success: true, filename: safeNew };
-
-  // Check if target already exists
+  const newPath = path.join(path.dirname(oldPath), safeName);
+  if (!isPathInsideMediaDir(newPath)) return { error: 'Invalid destination path' };
+  if (oldPath === newPath) return { success: true, filename: safeName, id };
   if (fs.existsSync(newPath)) return { error: 'A file with that name already exists' };
 
   try {
     fs.renameSync(oldPath, newPath);
-
-    // Rename thumbnail if it exists
-    const oldThumbName = video.filename.replace(/\.[^.]+$/, '.jpg');
-    const newThumbName = safeNew.replace(/\.[^.]+$/, '.jpg');
-    const oldThumbPath = path.join(THUMBNAILS_DIR, oldThumbName);
-    const newThumbPath = path.join(THUMBNAILS_DIR, newThumbName);
-    if (fs.existsSync(oldThumbPath)) {
-      try { fs.renameSync(oldThumbPath, newThumbPath); } catch (e) {}
+    const oldThumbnail = thumbnailPathFor(video.filename);
+    const newThumbnail = thumbnailPathFor(safeName);
+    if (fs.existsSync(oldThumbnail) && oldThumbnail !== newThumbnail) {
+      try { fs.renameSync(oldThumbnail, newThumbnail); } catch { /* thumbnail can be regenerated */ }
     }
 
-    getDb().prepare(
-      'UPDATE videos SET filename = ?, full_path = ?, thumbnail_path = ? WHERE id = ?'
-    ).run(safeNew, newPath, fs.existsSync(newThumbPath) ? newThumbPath : null, id);
+    getDb().prepare(`
+      UPDATE videos
+      SET filename = ?, full_path = ?, thumbnail_path = ?, last_seen = datetime('now')
+      WHERE id = ?
+    `).run(safeName, newPath, fs.existsSync(newThumbnail) ? newThumbnail : null, id);
 
-    return { success: true, filename: safeNew, id };
-  } catch (err) {
-    return { error: err.message };
+    return { success: true, filename: safeName, id };
+  } catch (error) {
+    return { error: error.message };
   }
 }
 
 function deleteVideo(id) {
   const video = getVideoById(id);
-  if (!video) return { error: 'Video not found' };
+  if (!video) return { error: 'Media not found' };
+  if (!isPathInsideMediaDir(video.full_path)) return { error: 'File is outside the configured media folder' };
 
   try {
     fs.unlinkSync(video.full_path);
-
-    // Remove thumbnail
-    const thumbName = video.filename.replace(/\.[^.]+$/, '.jpg');
-    const thumbPath = path.join(THUMBNAILS_DIR, thumbName);
-    if (fs.existsSync(thumbPath)) {
-      try { fs.unlinkSync(thumbPath); } catch (e) {}
+    const thumbnailPath = thumbnailPathFor(video.filename);
+    if (fs.existsSync(thumbnailPath)) {
+      try { fs.unlinkSync(thumbnailPath); } catch { /* deleting the media remains authoritative */ }
     }
-
     getDb().prepare('UPDATE videos SET status = ? WHERE id = ?').run('deleted', id);
     return { success: true, id };
-  } catch (err) {
-    return { error: err.message };
+  } catch (error) {
+    return { error: error.message };
   }
 }
 
-function openInVLC(id) {
+function openInDesktop(id) {
   const video = getVideoById(id);
-  if (!video) return { error: 'Video not found' };
+  if (!video) return { error: 'Media not found' };
+  if (!isPathInsideMediaDir(video.full_path)) return { error: 'File is outside the configured media folder' };
+  if (!fs.existsSync(video.full_path)) return { error: 'File is not available on disk' };
   return { fullPath: video.full_path };
 }
 
-// --- Cleanup ---
 function closeDb() {
-  if (db) {
-    db.close();
-    db = null;
-  }
+  if (!db) return;
+  db.close();
+  db = null;
 }
 
 module.exports = {
-  initDb,
-  getDb,
-  getVideoById,
-  getVideoByFilename,
+  closeDb,
+  deleteVideo,
   getAllActiveVideos,
+  getDb,
+  getVideoByFilename,
+  getVideoById,
+  initDb,
+  openInDesktop,
   scanDirectory,
   toggleFavorite,
-  updateTags,
   updateFilename,
-  deleteVideo,
-  openInVLC,
-  closeDb
+  updateTags
 };

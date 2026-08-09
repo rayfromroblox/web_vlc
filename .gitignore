@@ -1,1 +1,8 @@
-nul 
+node_modules/
+.env
+.env.*
+*.db-shm
+*.db-wal
+server.log
+.DS_Store
+npm-debug.log*
