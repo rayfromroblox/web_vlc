@@ -1,11 +1,11 @@
 const path = require('path');
 
-const LEGACY_WINDOWS_MEDIA_DIR = 'C:\\Users\\R4YY\\Desktop\\R4Y\\Media\\Edits';
-
+// The browser can select a folder at runtime, so this directory is only an
+// optional drop-in library for people who prefer to keep media beside the app.
 const MEDIA_DIR = path.resolve(
   process.env.WEBVLC_MEDIA_DIR ||
   process.env.EDITS_DIR ||
-  LEGACY_WINDOWS_MEDIA_DIR
+  path.join(__dirname, 'media')
 );
 
 const THUMBNAILS_DIR = path.join(__dirname, 'thumbnails');

@@ -84,6 +84,11 @@
         <span>Open media</span>
         <input id="filePicker" type="file" accept="video/*,audio/*" multiple>
       </label>
+      <label class="button button-secondary open-folder-button" for="folderPicker" title="Choose a media folder">
+        <svg><use href="#i-folder"/></svg>
+        <span>Choose folder</span>
+        <input id="folderPicker" type="file" accept="video/*,audio/*" webkitdirectory directory multiple>
+      </label>
       <button class="button button-quiet" id="rescanBtn" type="button" title="Rescan media folder">
         <svg><use href="#i-refresh"/></svg>
         <span>Scan</span>
@@ -124,8 +129,8 @@
       <div class="library-source">
         <div class="source-icon"><svg><use href="#i-folder"/></svg></div>
         <div class="source-copy">
-          <span>Watching folder</span>
-          <strong id="libraryPath" title="Media library path">Connecting…</strong>
+          <span>Media source</span>
+          <strong id="libraryPath" title="Selected media source">Connecting…</strong>
         </div>
         <span class="source-state" id="sourceState" aria-label="Folder availability"></span>
       </div>
@@ -198,10 +203,11 @@
         </div>
         <p class="eyebrow">Nothing queued yet</p>
         <h2 id="emptyTitle">Bring your media over</h2>
-        <p id="emptyMessage">Open files from this device or point web_vlc at a folder to build your library.</p>
+        <p id="emptyMessage">Choose a folder on this device to build a private, in-browser library.</p>
         <div class="empty-actions">
+          <label class="button button-primary" for="folderPicker"><svg><use href="#i-folder"/></svg> Choose folder</label>
           <label class="button button-primary" for="filePicker"><svg><use href="#i-plus"/></svg> Open media</label>
-          <button class="button button-secondary" id="emptyScanBtn" type="button"><svg><use href="#i-refresh"/></svg> Scan folder</button>
+          <button class="button button-secondary" id="emptyScanBtn" type="button"><svg><use href="#i-refresh"/></svg> Scan app media</button>
         </div>
       </section>
     </main>

@@ -18,6 +18,7 @@ const {
 const app = express();
 
 fs.mkdirSync(THUMBNAILS_DIR, { recursive: true });
+fs.mkdirSync(MEDIA_DIR, { recursive: true });
 
 let ffmpegAvailable = false;
 try {
@@ -314,6 +315,9 @@ function startServer() {
     console.log(`  Media folder       → ${MEDIA_DIR}`);
     console.log(`  Folder connected   → ${scan.available ? 'yes' : 'no'}`);
     console.log(`  FFmpeg thumbnails  → ${ffmpegAvailable ? 'enabled' : 'unavailable'}\n`);
+    if (process.env.WEBVLC_OPEN_BROWSER === '1') {
+      openDesktopFile(`http://${HOST}:${PORT}`, () => {});
+    }
   });
   return server;
 }

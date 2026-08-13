@@ -407,7 +407,8 @@ body.player-expanded {
   background: #ef5555;
 }
 
-.open-media-button input {
+.open-media-button input,
+.open-folder-button input {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -2518,7 +2519,8 @@ body.player-expanded {
   }
 
   .topbar-actions .button-quiet span,
-  .open-media-button span {
+  .open-media-button span,
+  .open-folder-button span {
     display: none;
   }
 

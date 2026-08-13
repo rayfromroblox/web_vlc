@@ -29,6 +29,7 @@ const state = {
   repeat: false,
   rateIndex: 0,
   localCounter: 0,
+  selectedFolderName: null,
   dragDepth: 0
 };
 
@@ -40,6 +41,7 @@ const dom = {
   rescanBtn: document.getElementById('rescanBtn'),
   emptyScanBtn: document.getElementById('emptyScanBtn'),
   filePicker: document.getElementById('filePicker'),
+  folderPicker: document.getElementById('folderPicker'),
   sidebarToggle: document.getElementById('sidebarToggle'),
   sidebarScrim: document.getElementById('sidebarScrim'),
   tagNavigation: document.getElementById('tagNavigation'),
@@ -241,8 +243,13 @@ function renderSidebar() {
     button.classList.toggle('active', state.section === button.dataset.section && !state.selectedTag);
   });
 
-  const config = state.config;
-  if (config) {
+  if (state.selectedFolderName) {
+    dom.libraryPath.textContent = state.selectedFolderName;
+    dom.libraryPath.title = 'Selected in this browser session';
+    dom.sourceState.classList.remove('offline');
+    dom.sourceState.title = 'Folder selected for this browser session';
+  } else if (state.config) {
+    const config = state.config;
     dom.libraryPath.textContent = config.displayPath || config.path || 'Media folder';
     dom.libraryPath.title = config.path || '';
     dom.sourceState.classList.toggle('offline', !config.available);
@@ -377,7 +384,7 @@ function renderContent() {
     dom.libraryContent.innerHTML = '';
     dom.emptyState.hidden = false;
     dom.emptyTitle.textContent = 'Bring your media over';
-    dom.emptyMessage.textContent = 'Open files from this device or point web_vlc at a folder to build your library.';
+    dom.emptyMessage.textContent = 'Choose a folder on this device to build a private, in-browser library.';
     return;
   }
 
@@ -473,7 +480,7 @@ async function rescanMedia() {
     const data = await fetchJson('/scan', { method: 'POST' });
     await loadMedia({ quiet: true });
     if (data.available === false) {
-      showToast('The configured media folder is unavailable. Check WEBVLC_MEDIA_DIR.', 'error');
+      showToast('The app media folder is unavailable.', 'error');
     } else {
       showToast(`Scan complete · ${data.inserted || 0} new · ${data.markedMissing || 0} offline`);
     }
@@ -952,18 +959,29 @@ function isSupportedFile(file) {
   return file.type.startsWith('video/') || file.type.startsWith('audio/') || VIDEO_EXTENSIONS.has(extension) || AUDIO_EXTENSIONS.has(extension);
 }
 
-async function addLocalFiles(fileList) {
+function clearSessionMedia() {
+  if (state.currentId?.startsWith('local-')) closePlayer();
+  state.sessionMedia.forEach((item) => {
+    URL.revokeObjectURL(item.url);
+    if (item.thumbnailUrl) URL.revokeObjectURL(item.thumbnailUrl);
+  });
+  state.sessionMedia = [];
+}
+
+async function addLocalFiles(fileList, { replace = false, folderName = null } = {}) {
   const files = [...fileList].filter(isSupportedFile);
   if (!files.length) {
     showToast('No supported audio or video files found', 'error');
     return;
   }
 
+  if (replace) clearSessionMedia();
+
   const added = files.map((file) => {
     const item = {
       id: `local-${++state.localCounter}`,
       serverId: null,
-      filename: file.name,
+      filename: file.webkitRelativePath || file.name,
       tags: ['local'],
       favorite: false,
       hasThumbnail: false,
@@ -984,8 +1002,9 @@ async function addLocalFiles(fileList) {
   state.section = 'all';
   state.selectedTag = null;
   state.mediaFilter = 'all';
+  state.selectedFolderName = folderName || state.selectedFolderName;
   renderApp();
-  showToast(`${added.length} local file${added.length === 1 ? '' : 's'} added for this session`);
+  showToast(`${added.length} file${added.length === 1 ? '' : 's'} ${replace ? 'loaded from the selected folder' : 'added for this session'}`);
   openPlayer(added[0].id);
 
   added.filter((item) => item.mediaType === 'video').forEach((item) => {
@@ -1110,6 +1129,13 @@ dom.rescanBtn.addEventListener('click', rescanMedia);
 dom.emptyScanBtn.addEventListener('click', rescanMedia);
 dom.filePicker.addEventListener('change', (event) => {
   addLocalFiles(event.target.files);
+  event.target.value = '';
+});
+dom.folderPicker.addEventListener('change', (event) => {
+  const files = event.target.files;
+  const firstPath = files[0]?.webkitRelativePath || '';
+  const folderName = firstPath.split('/').filter(Boolean)[0] || 'Selected folder';
+  addLocalFiles(files, { replace: true, folderName });
   event.target.value = '';
 });
 dom.sidebarToggle.addEventListener('click', () => dom.body.classList.toggle('sidebar-open'));
