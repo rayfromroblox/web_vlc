@@ -25,13 +25,17 @@ Everything is local-first. Indexed files remain on disk, and files opened throug
 
 ## Getting started
 
-Requirements:
+The only requirement is Node.js 20, 22, or 24 (an LTS release). npm is included with Node.js; FFmpeg is optional and enables video thumbnails.
 
-- Node.js 20, 22, or 24 (an LTS release)
-- npm
-- FFmpeg is optional but recommended for thumbnails
+## One-command startup
 
-> Coming soon: a one-command install (`bun add -g web-vlc`) that lets you open a terminal in any video folder, type `web-vlc`, and go. Until then, follow the steps below.
+From the project folder, run:
+
+```bash
+npm start
+```
+
+On the first run, that one command installs or repairs every project dependency listed in `package.json`, then starts the player. There is no separate install command and no media-folder environment variable to configure.
 
 **Step 1 — Get the project**
 
@@ -48,7 +52,7 @@ cd web_vlc
 npm start
 ```
 
-That’s it. On the first run, web_vlc installs or repairs its own dependencies automatically. On Windows, you can simply double-click `start.bat`; it opens the app when it is ready.
+On Windows, you can simply double-click `start.bat`; it runs the same setup and opens the app when it is ready.
 
 **Step 3 — Choose your folder**
 
