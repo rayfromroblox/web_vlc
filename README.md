@@ -38,7 +38,7 @@ Requirements:
 Download or clone this repository into a folder of your choice, for example:
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/rayfromroblox/web_vlc.git
 cd web_vlc
 ```
 
