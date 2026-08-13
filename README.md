@@ -6,7 +6,7 @@ web_vlc indexes a folder on your computer, keeps the library metadata in SQLite,
 
 ## What it does
 
-- Indexes video and audio from one local folder
+- Lets you choose a local media folder from inside the app
 - Streams media with byte-range support for responsive seeking
 - Generates and caches video thumbnails with FFmpeg when available
 - Opens local files instantly through drag and drop or the file picker
@@ -23,55 +23,53 @@ web_vlc indexes a folder on your computer, keeps the library metadata in SQLite,
 
 Everything is local-first. Indexed files remain on disk, and files opened through the browser remain in that browser session.
 
-## Quick start
+## Getting started
 
 Requirements:
 
-- Node.js 20 or newer
+- Node.js 20, 22, or 24 (an LTS release)
 - npm
 - FFmpeg is optional but recommended for thumbnails
 
-Install dependencies:
+> Coming soon: a one-command install (`bun add -g web-vlc`) that lets you open a terminal in any video folder, type `web-vlc`, and go. Until then, follow the steps below.
+
+**Step 1 — Get the project**
+
+Download or clone this repository into a folder of your choice, for example:
 
 ```bash
-npm install
+git clone <repo-url>
+cd web_vlc
 ```
 
-If the project folder was copied from a different operating system, rebuild the native SQLite module once:
+**Step 2 — Start the player**
 
 ```bash
-npm rebuild better-sqlite3
-```
-
-Point web_vlc at your media folder and start it:
-
-### Windows PowerShell
-
-```powershell
-$env:WEBVLC_MEDIA_DIR = "C:\Users\you\Videos"
 npm start
 ```
 
-### macOS or Linux
+That’s it. On the first run, web_vlc installs or repairs its own dependencies automatically. On Windows, you can simply double-click `start.bat`; it opens the app when it is ready.
 
-```bash
-WEBVLC_MEDIA_DIR="$HOME/Videos" npm start
-```
+**Step 3 — Choose your folder**
 
-Then open [http://127.0.0.1:4000](http://127.0.0.1:4000).
+Navigate to [http://127.0.0.1:4000](http://127.0.0.1:4000), click **Choose folder**, and select the folder containing your media. Nothing is uploaded; the selected folder stays available for the current browser session. You can also open individual files or drag them in.
 
-The original project media folder remains the fallback when `WEBVLC_MEDIA_DIR` is not set, so existing installs continue to work.
+## Troubleshooting
+
+- **Port already in use** — set a different port with `WEBVLC_PORT`, for example `WEBVLC_PORT=5000 npm start` on macOS/Linux or `$env:WEBVLC_PORT = "5000"` in Windows PowerShell.
+- **The launcher says Node.js is unsupported** — install Node.js 20, 22, or 24 (an LTS release), then start the app again.
+- **A file will not play in the browser** — some formats (such as MKV) depend on codecs the browser does not support. Use the “Open in desktop player” action to play those files in VLC or another native player.
 
 ## Configuration
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `WEBVLC_MEDIA_DIR` | Existing project media folder | Folder to index and watch |
+| `WEBVLC_MEDIA_DIR` | `./media` | Optional app-managed folder to index and watch |
 | `WEBVLC_PORT` | `4000` | HTTP port |
 | `WEBVLC_HOST` | `127.0.0.1` | Bind address |
 | `WEBVLC_DB_PATH` | `./edits.db` | SQLite database path |
 
-`EDITS_DIR` and `PORT` are still accepted as compatibility aliases.
+`WEBVLC_MEDIA_DIR` is optional; normal use is to choose a folder in the app. `EDITS_DIR` and `PORT` are still accepted as compatibility aliases.
 
 To make the app available elsewhere on your private network, set `WEBVLC_HOST=0.0.0.0`. Be aware that library actions include rename and permanent delete, so do not expose the server directly to the public internet.
 

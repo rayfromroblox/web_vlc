@@ -7,16 +7,13 @@ if "%WEBVLC_PORT%"=="" set "WEBVLC_PORT=4000"
 
 echo.
 echo   web_vlc - local media, beautifully played
-echo   Starting at http://127.0.0.1:%WEBVLC_PORT%
-if "%WEBVLC_MEDIA_DIR%"=="" (
-  echo   Tip: set WEBVLC_MEDIA_DIR to choose a different media folder.
-)
+echo   Getting things ready…
 echo.
 
-start "" "http://127.0.0.1:%WEBVLC_PORT%"
-node server.js
+set "WEBVLC_OPEN_BROWSER=1"
+npm start
 if errorlevel 1 (
   echo.
-  echo web_vlc could not start. Confirm that Node.js 20 or newer is installed.
+  echo web_vlc could not start. Install Node.js 20, 22, or 24, then run this file again.
   pause
 )

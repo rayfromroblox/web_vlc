@@ -4,11 +4,11 @@
   "description": "A private, local-first media library and VLC-inspired player for the browser",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "check": "node --check server.js && node --check db.js && node --check config.js && node --check public/app.js"
+    "start": "node start.js",
+    "check": "node --check start.js && node --check server.js && node --check db.js && node --check config.js && node --check public/app.js"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=20 <25"
   },
   "dependencies": {
     "better-sqlite3": "^12.10.0",
