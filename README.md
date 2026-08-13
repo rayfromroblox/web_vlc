@@ -23,40 +23,19 @@ web_vlc indexes a folder on your computer, keeps the library metadata in SQLite,
 
 Everything is local-first. Indexed files remain on disk, and files opened through the browser remain in that browser session.
 
-## Getting started
+## Quick start
 
-The only requirement is Node.js 20, 22, or 24 (an LTS release). npm is included with Node.js; FFmpeg is optional and enables video thumbnails.
-
-## One-command startup
-
-From the project folder, run:
-
-```bash
-npm start
-```
-
-On the first run, that one command installs or repairs every project dependency listed in `package.json`, then starts the player. There is no separate install command and no media-folder environment variable to configure.
-
-**Step 1 — Get the project**
-
-Download or clone this repository into a folder of your choice, for example:
+Install Node.js 20, 22, or 24 (an LTS release), then run:
 
 ```bash
 git clone https://github.com/rayfromroblox/web_vlc.git
 cd web_vlc
-```
-
-**Step 2 — Start the player**
-
-```bash
 npm start
 ```
 
-On Windows, you can simply double-click `start.bat`; it runs the same setup and opens the app when it is ready.
+`npm start` installs or repairs everything the app needs, then starts the player. On Windows, you can also double-click `start.bat` after downloading the project.
 
-**Step 3 — Choose your folder**
-
-Navigate to [http://127.0.0.1:4000](http://127.0.0.1:4000), click **Choose folder**, and select the folder containing your media. Nothing is uploaded; the selected folder stays available for the current browser session. You can also open individual files or drag them in.
+Open [http://127.0.0.1:4000](http://127.0.0.1:4000), click **Choose folder**, and select your media folder. Nothing is uploaded; selected media stays available for the current browser session. You can also open or drag in individual files.
 
 ## Troubleshooting
 
