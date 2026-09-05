@@ -1,0 +1,23 @@
+{
+  "name": "web-vlc",
+  "version": "3.0.2",
+  "description": "A private, local-first media library and VLC-inspired player for the browser",
+  "main": "server.js",
+  "scripts": {
+    "start": "node start.js",
+    "check": "node --check start.js && node --check server.js && node --check db.js && node --check config.js && node --check public/app.js",
+    "test": "node --test",
+    "package:windows": "powershell -ExecutionPolicy Bypass -File scripts/package-windows.ps1",
+    "package:linux": "sh scripts/package-linux.sh"
+  },
+  "engines": {
+    "node": ">=20 <27"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.10.0",
+    "express": "^5.2.1"
+  },
+  "allowScripts": {
+    "better-sqlite3@12.10.0": true
+  }
+}

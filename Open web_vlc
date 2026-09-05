@@ -1,0 +1,17 @@
+#!/usr/bin/env sh
+set -eu
+
+APP_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+RUNTIME_NODE="$APP_DIR/runtime/bin/node"
+
+if [ -x "$RUNTIME_NODE" ]; then
+  exec "$RUNTIME_NODE" "$APP_DIR/start.js"
+fi
+
+if command -v node >/dev/null 2>&1; then
+  exec node "$APP_DIR/start.js"
+fi
+
+printf '%s\n' 'This source checkout needs Node.js 20 through 26.' >&2
+printf '%s\n' 'Download a portable web_vlc release for one-click setup, or install Node.js and try again.' >&2
+exit 1

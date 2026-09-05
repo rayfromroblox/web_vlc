@@ -1,0 +1,102 @@
+name: Build portable releases
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to create or update (for example, v1.0.0)
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Verify the project
+        run: |
+          npm ci
+          npm run check
+          npm test
+
+      - name: Build portable ZIP
+        run: npm run package:windows
+
+      - name: Keep the ZIP as a workflow artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: web_vlc-windows-x64
+          path: release/web_vlc-windows-x64.zip
+          if-no-files-found: error
+
+  linux:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Verify the project
+        run: |
+          npm ci
+          npm run check
+          npm test
+
+      - name: Build portable archive
+        run: npm run package:linux
+
+      - name: Keep the archive as a workflow artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: web_vlc-linux-x64
+          path: release/web_vlc-linux-x64.tar.gz
+          if-no-files-found: error
+
+  publish:
+    needs: [windows, linux]
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+
+    steps:
+      - name: Download portable assets
+        uses: actions/download-artifact@v7
+        with:
+          pattern: web_vlc-*
+          merge-multiple: true
+          path: release
+
+      - name: Publish the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" release/* --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$RELEASE_TAG" release/* --generate-notes --title "web_vlc $RELEASE_TAG" --repo "$GITHUB_REPOSITORY"
+          fi

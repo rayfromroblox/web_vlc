@@ -1,0 +1,45 @@
+name: Check web_vlc
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - run: npm test
+
+      - name: Test a 1,000-item library in Windows Edge
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/windows-browser-smoke.ps1
+
+      - name: Build the Windows portable package
+        if: runner.os == 'Windows'
+        run: npm run package:windows
+
+      - name: Verify the Windows portable package
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $archive = 'release/web_vlc-windows-x64.zip'
+          if (-not (Test-Path $archive)) { throw 'Windows package was not created.' }
+          $entries = tar -tf $archive
+          if ($entries -notcontains 'web_vlc-windows-x64/runtime/node.exe') { throw 'Bundled Node runtime is missing.' }
+          if ($entries -notcontains 'web_vlc-windows-x64/Open web_vlc.vbs') { throw 'Windows launcher is missing.' }
+          if ($entries -match '(^|/)(edits\.db|library\.db|media/|thumbnails/)') { throw 'Runtime data leaked into the package.' }
