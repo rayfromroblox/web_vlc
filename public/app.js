@@ -1,0 +1,1661 @@
+/* web_vlc — local-first media library and player */
+
+const VIDEO_EXTENSIONS = new Set([
+  'mp4', 'mov', 'avi', 'mkv', 'webm', 'wmv', 'flv', 'm4v', 'mpg', 'mpeg', 'ogv'
+]);
+const AUDIO_EXTENSIONS = new Set([
+  'mp3', 'wav', 'flac', 'aac', 'm4a', 'ogg', 'opus', 'wma'
+]);
+const PLAYBACK_RATES = [1, 1.25, 1.5, 2, 0.75];
+const MAX_CONCURRENT_LOCAL_THUMBNAILS = navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4 ? 1 : 2;
+const INITIAL_VISIBLE_MEDIA = 72;
+const MEDIA_RENDER_BATCH = 72;
+const MAX_RENDERED_QUEUE_ITEMS = 60;
+const SETTINGS_DB_NAME = 'webvlc-settings';
+const SETTINGS_STORE_NAME = 'handles';
+
+const localThumbnailQueue = [];
+let activeLocalThumbnailJobs = 0;
+let searchRenderTimer = null;
+let thumbnailRenderTimer = null;
+let loadMoreObserver = null;
+let localThumbnailObserver = null;
+let lastMediaPositionBucket = -1;
+
+function storedPreference(key, allowedValues, fallback) {
+  try {
+    const value = localStorage.getItem(key);
+    return allowedValues.includes(value) ? value : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+const state = {
+  serverMedia: [],
+  sessionMedia: [],
+  search: '',
+  section: 'all',
+  selectedTag: null,
+  mediaFilter: 'all',
+  view: storedPreference('webvlc:view', ['grid', 'list'], 'grid'),
+  sort: storedPreference('webvlc:sort', ['name-asc', 'name-desc', 'newest', 'favorites'], 'name-asc'),
+  loading: true,
+  config: null,
+  currentId: null,
+  queue: [],
+  contextId: null,
+  editingId: null,
+  deletingId: null,
+  expanded: false,
+  shuffle: false,
+  repeat: false,
+  rateIndex: 0,
+  localCounter: 0,
+  selectedFolderName: null,
+  dragDepth: 0,
+  visibleMediaCount: INITIAL_VISIBLE_MEDIA
+};
+
+const dom = {
+  body: document.body,
+  searchInput: document.getElementById('searchInput'),
+  clearSearchBtn: document.getElementById('clearSearchBtn'),
+  globalSearch: document.querySelector('.global-search'),
+  rescanBtn: document.getElementById('rescanBtn'),
+  chooseFolderBtn: document.getElementById('chooseFolderBtn'),
+  emptyChooseFolderBtn: document.getElementById('emptyChooseFolderBtn'),
+  filePicker: document.getElementById('filePicker'),
+  folderPicker: document.getElementById('folderPicker'),
+  sidebarToggle: document.getElementById('sidebarToggle'),
+  sidebarCloseBtn: document.getElementById('sidebarCloseBtn'),
+  sidebarScrim: document.getElementById('sidebarScrim'),
+  tagNavigation: document.getElementById('tagNavigation'),
+  allCount: document.getElementById('allCount'),
+  favoriteCount: document.getElementById('favoriteCount'),
+  tagCount: document.getElementById('tagCount'),
+  libraryPath: document.getElementById('libraryPath'),
+  sourceState: document.getElementById('sourceState'),
+  connectionPill: document.getElementById('connectionPill'),
+  connectionLabel: document.getElementById('connectionLabel'),
+  libraryEyebrow: document.getElementById('libraryEyebrow'),
+  libraryTitle: document.getElementById('libraryTitle'),
+  librarySubtitle: document.getElementById('librarySubtitle'),
+  summaryMedia: document.getElementById('summaryMedia'),
+  summaryFavorites: document.getElementById('summaryFavorites'),
+  summaryFormats: document.getElementById('summaryFormats'),
+  resultCount: document.getElementById('resultCount'),
+  mediaFilters: document.getElementById('mediaFilters'),
+  sortSelect: document.getElementById('sortSelect'),
+  viewGridBtn: document.getElementById('viewGridBtn'),
+  viewListBtn: document.getElementById('viewListBtn'),
+  loading: document.getElementById('loading'),
+  libraryContent: document.getElementById('libraryContent'),
+  emptyState: document.getElementById('emptyState'),
+  emptyTitle: document.getElementById('emptyTitle'),
+  emptyMessage: document.getElementById('emptyMessage'),
+  playerWindow: document.getElementById('playerWindow'),
+  playerVideo: document.getElementById('playerVideo'),
+  videoCanvas: document.getElementById('videoCanvas'),
+  audioVisual: document.getElementById('audioVisual'),
+  playerMessage: document.getElementById('playerMessage'),
+  stageTitle: document.getElementById('stageTitle'),
+  playerTitle: document.getElementById('playerTitle'),
+  playerMeta: document.getElementById('playerMeta'),
+  playerArtwork: document.getElementById('playerArtwork'),
+  playerPlayBtn: document.getElementById('playerPlayBtn'),
+  canvasPlayBtn: document.getElementById('canvasPlayBtn'),
+  playerPrevBtn: document.getElementById('playerPrevBtn'),
+  playerNextBtn: document.getElementById('playerNextBtn'),
+  playerBackBtn: document.getElementById('playerBackBtn'),
+  playerForwardBtn: document.getElementById('playerForwardBtn'),
+  playerSeek: document.getElementById('playerSeek'),
+  playerCurrentTime: document.getElementById('playerCurrentTime'),
+  playerDuration: document.getElementById('playerDuration'),
+  playerMuteBtn: document.getElementById('playerMuteBtn'),
+  playerVolume: document.getElementById('playerVolume'),
+  playbackRateBtn: document.getElementById('playbackRateBtn'),
+  repeatBtn: document.getElementById('repeatBtn'),
+  shuffleBtn: document.getElementById('shuffleBtn'),
+  playerExpandBtn: document.getElementById('playerExpandBtn'),
+  dockExpandBtn: document.getElementById('dockExpandBtn'),
+  playerCollapseBtn: document.getElementById('playerCollapseBtn'),
+  playerCloseBtn: document.getElementById('playerCloseBtn'),
+  playerPipBtn: document.getElementById('playerPipBtn'),
+  playerFullscreenBtn: document.getElementById('playerFullscreenBtn'),
+  queueList: document.getElementById('queueList'),
+  queueCount: document.getElementById('queueCount'),
+  contextMenu: document.getElementById('contextMenu'),
+  editDialog: document.getElementById('editDialog'),
+  editForm: document.getElementById('editForm'),
+  editFilename: document.getElementById('editFilename'),
+  editExtension: document.getElementById('editExtension'),
+  editTags: document.getElementById('editTags'),
+  saveEditBtn: document.getElementById('saveEditBtn'),
+  confirmDialog: document.getElementById('confirmDialog'),
+  confirmForm: document.getElementById('confirmForm'),
+  confirmFilename: document.getElementById('confirmFilename'),
+  confirmDeleteBtn: document.getElementById('confirmDeleteBtn'),
+  dropOverlay: document.getElementById('dropOverlay'),
+  toastRegion: document.getElementById('toastRegion')
+};
+
+function icon(name) {
+  return `<svg aria-hidden="true"><use href="#i-${name}"></use></svg>`;
+}
+
+function setButtonIcon(button, name) {
+  const use = button.querySelector('use');
+  if (use) use.setAttribute('href', `#i-${name}`);
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;');
+}
+
+function extensionOf(filename) {
+  const dot = filename.lastIndexOf('.');
+  return dot > 0 ? filename.slice(dot + 1).toLowerCase() : '';
+}
+
+function splitExtension(filename) {
+  const dot = filename.lastIndexOf('.');
+  return dot > 0
+    ? { base: filename.slice(0, dot), extension: filename.slice(dot) }
+    : { base: filename, extension: '' };
+}
+
+function mediaTypeFrom(filename, suppliedType) {
+  if (suppliedType === 'audio' || suppliedType === 'video') return suppliedType;
+  return AUDIO_EXTENSIONS.has(extensionOf(filename)) ? 'audio' : 'video';
+}
+
+function normalizeServerMedia(item) {
+  return {
+    id: `server-${item.id}`,
+    serverId: Number(item.id),
+    filename: item.filename,
+    tags: Array.isArray(item.tags) ? item.tags : [],
+    favorite: Boolean(item.favorite),
+    hasThumbnail: Boolean(item.hasThumbnail),
+    thumbnailUrl: item.hasThumbnail ? `/thumbnail/${item.id}` : null,
+    mediaType: mediaTypeFrom(item.filename, item.mediaType),
+    extension: extensionOf(item.filename),
+    size: Number(item.size) || 0,
+    modifiedAt: item.modifiedAt || item.lastSeen || null,
+    available: item.available !== false,
+    local: false,
+    url: `/video/${item.id}`
+  };
+}
+
+function allMedia() {
+  if (state.selectedFolderName) return [...state.sessionMedia];
+  return [...state.sessionMedia, ...state.serverMedia];
+}
+
+function findMedia(id) {
+  const mediaId = String(id);
+  return state.sessionMedia.find((item) => item.id === mediaId)
+    || state.serverMedia.find((item) => item.id === mediaId);
+}
+
+function resetVisibleMedia() {
+  state.visibleMediaCount = INITIAL_VISIBLE_MEDIA;
+  loadMoreObserver?.disconnect();
+}
+
+function setSidebarOpen(open) {
+  dom.body.classList.toggle('sidebar-open', Boolean(open));
+  dom.sidebarToggle.setAttribute('aria-expanded', String(Boolean(open)));
+}
+
+function compareName(a, b) {
+  return a.filename.localeCompare(b.filename, undefined, { numeric: true, sensitivity: 'base' });
+}
+
+function timestampOf(item) {
+  const parsed = Date.parse(item.modifiedAt || '');
+  return Number.isFinite(parsed) ? parsed : (item.serverId || 0);
+}
+
+function getFilteredMedia() {
+  const query = state.search.trim().toLocaleLowerCase();
+  let items = allMedia().filter((item) => {
+    if (query) {
+      const haystack = `${item.filename} ${item.tags.join(' ')} ${item.extension}`.toLocaleLowerCase();
+      if (!haystack.includes(query)) return false;
+    }
+    if (state.section === 'favorites' && !item.favorite) return false;
+    if (state.selectedTag && !item.tags.includes(state.selectedTag)) return false;
+    if (state.mediaFilter !== 'all' && item.mediaType !== state.mediaFilter) return false;
+    return true;
+  });
+
+  const sortMode = state.section === 'recent' ? 'newest' : state.sort;
+  items.sort((a, b) => {
+    if (sortMode === 'name-desc') return compareName(b, a);
+    if (sortMode === 'newest') return timestampOf(b) - timestampOf(a) || compareName(a, b);
+    if (sortMode === 'favorites') return Number(b.favorite) - Number(a.favorite) || compareName(a, b);
+    return compareName(a, b);
+  });
+
+  if (state.section === 'recent') items = items.slice(0, 30);
+  return items;
+}
+
+function tagCounts() {
+  const counts = new Map();
+  allMedia().forEach((item) => {
+    item.tags.forEach((tag) => counts.set(tag, (counts.get(tag) || 0) + 1));
+  });
+  return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+}
+
+function renderSidebar() {
+  const items = allMedia();
+  const tags = tagCounts();
+  dom.allCount.textContent = items.length;
+  dom.favoriteCount.textContent = items.filter((item) => item.favorite).length;
+  dom.tagCount.textContent = `${tags.length} tag${tags.length === 1 ? '' : 's'}`;
+
+  const visibleTags = tags.slice(0, 10);
+  if (state.selectedTag && !visibleTags.some(([tag]) => tag === state.selectedTag)) {
+    const selected = tags.find(([tag]) => tag === state.selectedTag);
+    if (selected) visibleTags.unshift(selected);
+  }
+
+  dom.tagNavigation.innerHTML = visibleTags.map(([tag, count]) => `
+    <button class="tag-nav-item${state.selectedTag === tag ? ' active' : ''}" type="button" data-tag="${escapeHtml(tag)}">
+      <span class="tag-dot"></span>
+      <span>${escapeHtml(tag.replaceAll('_', ' '))}</span>
+      <span class="tag-nav-count">${count}</span>
+    </button>
+  `).join('');
+
+  document.querySelectorAll('.nav-item[data-section]').forEach((button) => {
+    button.classList.toggle('active', state.section === button.dataset.section && !state.selectedTag);
+  });
+
+  if (state.selectedFolderName) {
+    dom.libraryPath.textContent = state.selectedFolderName;
+    dom.libraryPath.title = 'Selected in this browser session';
+    dom.sourceState.classList.remove('offline');
+    dom.sourceState.title = 'Folder selected for this browser session';
+  } else if (state.config) {
+    const config = state.config;
+    dom.libraryPath.textContent = config.displayPath || config.path || 'Media folder';
+    dom.libraryPath.title = config.path || '';
+    dom.sourceState.classList.toggle('offline', !config.available);
+    dom.sourceState.title = config.available ? 'Folder connected' : 'Folder unavailable';
+  }
+
+  dom.rescanBtn.hidden = Boolean(state.selectedFolderName) || state.serverMedia.length === 0;
+}
+
+function renderHeading() {
+  let eyebrow = 'Media index';
+  let title = 'All media';
+  let subtitle = 'Files currently available on this machine.';
+
+  if (state.selectedTag) {
+    eyebrow = 'Tagged files';
+    title = `#${state.selectedTag.replaceAll('_', ' ')}`;
+    subtitle = `Files tagged ${state.selectedTag.replaceAll('_', ' ')}.`;
+  } else if (state.section === 'favorites') {
+    eyebrow = 'Saved files';
+    title = 'Favorites';
+    subtitle = 'Files you marked for quick access.';
+  } else if (state.section === 'recent') {
+    eyebrow = 'Latest scan';
+    title = 'Recent files';
+    subtitle = 'Most recently discovered media.';
+  }
+
+  if (state.search) {
+    eyebrow = 'Library search';
+    title = 'Search results';
+    subtitle = `Matching “${state.search}” across filenames, formats, and tags.`;
+  }
+
+  dom.libraryEyebrow.textContent = eyebrow;
+  dom.libraryTitle.textContent = title;
+  dom.librarySubtitle.textContent = subtitle;
+}
+
+function renderSummary() {
+  const items = allMedia();
+  const formats = new Set(items.map((item) => item.extension).filter(Boolean));
+  dom.summaryMedia.textContent = items.length;
+  dom.summaryFavorites.textContent = items.filter((item) => item.favorite).length;
+  dom.summaryFormats.textContent = formats.size;
+}
+
+function placeholderMarkup(item, hidden = false) {
+  const mediaIcon = item.mediaType === 'audio' ? 'music' : 'film';
+  return `<div class="card-placeholder media-thumb-fallback${item.mediaType === 'audio' ? ' audio-placeholder' : ''}${hidden ? ' is-hidden' : ''}">${icon(mediaIcon)}</div>`;
+}
+
+function thumbnailMarkup(item) {
+  if (!item.thumbnailUrl) return placeholderMarkup(item);
+  return `<img class="media-thumb" data-media-thumb src="${escapeHtml(item.thumbnailUrl)}" alt="" loading="lazy">${placeholderMarkup(item, true)}`;
+}
+
+function tagMarkup(tags, limit = 3) {
+  if (!tags.length) return '<span class="card-tag">untagged</span>';
+  const visible = tags.slice(0, limit).map((tag) => `<span class="card-tag">${escapeHtml(tag.replaceAll('_', ' '))}</span>`).join('');
+  const remaining = tags.length - limit;
+  return visible + (remaining > 0 ? `<span class="card-tag-more">+${remaining}</span>` : '');
+}
+
+function gridCardMarkup(item) {
+  const isCurrent = state.currentId === item.id;
+  const favoriteClass = item.favorite ? ' active favorite-indicator' : '';
+  return `
+    <article class="media-card${isCurrent ? ' is-current' : ''}" data-id="${item.id}">
+      <div class="card-visual" data-action="play">
+        ${thumbnailMarkup(item)}
+        <div class="card-top-actions">
+          <button class="card-icon-button favorite${favoriteClass}" type="button" data-action="favorite" aria-label="${item.favorite ? 'Remove from favorites' : 'Add to favorites'}">${icon('star')}</button>
+          <button class="card-icon-button" type="button" data-action="menu" aria-label="More options">${icon('more')}</button>
+        </div>
+        <button class="card-play" type="button" data-action="play" aria-label="Play">${icon(isCurrent && !dom.playerVideo.paused ? 'pause' : 'play')}</button>
+        <span class="card-badge${item.local ? ' local-badge' : ''}">${item.local ? 'This device' : escapeHtml(item.extension || item.mediaType)}</span>
+        ${item.available ? '' : '<span class="card-badge offline-badge">Offline</span>'}
+      </div>
+      <div class="card-info">
+        <h3 class="card-title" title="${escapeHtml(item.filename)}">${escapeHtml(item.filename)}</h3>
+        <span class="card-format">${escapeHtml(item.extension || item.mediaType)}</span>
+        <div class="card-tags">${tagMarkup(item.tags)}</div>
+      </div>
+    </article>
+  `;
+}
+
+function listRowMarkup(item) {
+  const isCurrent = state.currentId === item.id;
+  const status = item.available ? (item.local ? 'Session' : 'On disk') : 'Offline';
+  return `
+    <div class="media-row${isCurrent ? ' is-current' : ''}" data-id="${item.id}">
+      <div class="row-media">
+        <div class="row-thumb" data-action="play">
+          ${thumbnailMarkup(item)}
+          <button class="row-play" type="button" data-action="play" aria-label="Play">${icon(isCurrent && !dom.playerVideo.paused ? 'pause' : 'play')}</button>
+        </div>
+        <div class="row-title-wrap">
+          <strong title="${escapeHtml(item.filename)}">${escapeHtml(item.filename)}</strong>
+          <small>${escapeHtml(item.extension || item.mediaType)}${item.size ? ` · ${formatBytes(item.size)}` : ''}</small>
+        </div>
+      </div>
+      <div class="row-tags">${item.tags.length ? item.tags.slice(0, 3).map((tag) => `<span class="tag-pill">${escapeHtml(tag.replaceAll('_', ' '))}</span>`).join('') : '<span class="tag-pill">untagged</span>'}</div>
+      <span class="row-added">${formatRelativeDate(item.modifiedAt)}</span>
+      <span class="row-status${item.available ? '' : ' offline'}">${status}</span>
+      <button class="icon-button row-menu-button" type="button" data-action="menu" aria-label="More options">${icon('more')}</button>
+    </div>
+  `;
+}
+
+function wireThumbnailFallbacks(container) {
+  container.querySelectorAll('img[data-media-thumb]').forEach((image) => {
+    image.addEventListener('error', () => {
+      image.classList.add('is-hidden');
+      image.nextElementSibling?.classList.remove('is-hidden');
+    }, { once: true });
+  });
+}
+
+function renderContent() {
+  loadMoreObserver?.disconnect();
+  localThumbnailObserver?.disconnect();
+  dom.loading.hidden = !state.loading;
+  if (state.loading) {
+    dom.libraryContent.innerHTML = '';
+    dom.emptyState.hidden = true;
+    return;
+  }
+
+  const allItems = allMedia();
+  const items = getFilteredMedia();
+  const visibleItems = items.slice(0, state.visibleMediaCount);
+  const remainingCount = items.length - visibleItems.length;
+  dom.resultCount.textContent = `${items.length} item${items.length === 1 ? '' : 's'}`;
+
+  if (!allItems.length) {
+    dom.libraryContent.innerHTML = '';
+    dom.emptyState.hidden = false;
+    dom.emptyTitle.textContent = 'Where is your media?';
+    dom.emptyMessage.textContent = state.config?.available
+      ? 'The default media folder is empty. Choose the folder that holds your videos and audio.'
+      : 'Choose the folder that holds your videos and audio. Nothing leaves this device.';
+    return;
+  }
+
+  dom.emptyState.hidden = true;
+  if (!items.length) {
+    dom.libraryContent.innerHTML = `
+      <div class="empty-filter-state">
+        ${icon('search')}
+        <strong>No media matches</strong>
+        <p>Try another search, collection, or media type.</p>
+      </div>`;
+    return;
+  }
+
+  if (state.view === 'list') {
+    dom.libraryContent.innerHTML = `
+      <div class="media-list">
+        <div class="list-header"><span>Title</span><span>Tags</span><span>Added</span><span>Status</span><span></span></div>
+        ${visibleItems.map(listRowMarkup).join('')}
+      </div>
+      ${loadMoreMarkup(remainingCount)}`;
+  } else {
+    dom.libraryContent.innerHTML = `
+      <div class="media-grid">${visibleItems.map(gridCardMarkup).join('')}</div>
+      ${loadMoreMarkup(remainingCount)}`;
+  }
+  wireThumbnailFallbacks(dom.libraryContent);
+  wireProgressiveRendering();
+  wireLocalThumbnailGeneration();
+}
+
+function loadMoreMarkup(remainingCount) {
+  if (remainingCount <= 0) return '';
+  const nextCount = Math.min(MEDIA_RENDER_BATCH, remainingCount);
+  return `
+    <div class="load-more-sentinel" data-load-more>
+      <button class="button button-secondary" type="button">Show ${nextCount} more</button>
+      <span>${remainingCount} not shown</span>
+    </div>`;
+}
+
+function showMoreMedia() {
+  state.visibleMediaCount += MEDIA_RENDER_BATCH;
+  renderContent();
+}
+
+function wireProgressiveRendering() {
+  loadMoreObserver?.disconnect();
+  const sentinel = dom.libraryContent.querySelector('[data-load-more]');
+  if (!sentinel) return;
+  sentinel.querySelector('button')?.addEventListener('click', showMoreMedia, { once: true });
+  if (!('IntersectionObserver' in window)) return;
+  loadMoreObserver = new IntersectionObserver((entries) => {
+    if (entries.some((entry) => entry.isIntersecting)) showMoreMedia();
+  }, { rootMargin: '500px 0px' });
+  loadMoreObserver.observe(sentinel);
+}
+
+function renderControls() {
+  document.querySelectorAll('[data-media-filter]').forEach((button) => {
+    button.classList.toggle('active', button.dataset.mediaFilter === state.mediaFilter);
+  });
+  dom.sortSelect.value = state.section === 'recent' ? 'newest' : state.sort;
+  dom.sortSelect.disabled = state.section === 'recent';
+  dom.viewGridBtn.classList.toggle('active', state.view === 'grid');
+  dom.viewListBtn.classList.toggle('active', state.view === 'list');
+  dom.viewGridBtn.setAttribute('aria-pressed', String(state.view === 'grid'));
+  dom.viewListBtn.setAttribute('aria-pressed', String(state.view === 'list'));
+}
+
+function renderApp() {
+  renderSidebar();
+  renderHeading();
+  renderSummary();
+  renderControls();
+  renderContent();
+  renderQueue();
+}
+
+function setConnection(online, label = online ? 'Local' : 'Offline') {
+  dom.connectionPill.classList.toggle('offline', !online);
+  dom.connectionLabel.textContent = label;
+}
+
+async function fetchJson(url, options) {
+  const response = await fetch(url, options);
+  let data = {};
+  try {
+    data = await response.json();
+  } catch {
+    data = {};
+  }
+  if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
+  return data;
+}
+
+async function loadMedia({ quiet = false } = {}) {
+  if (!quiet) {
+    state.loading = true;
+    renderContent();
+  }
+  try {
+    const data = await fetchJson('/videos');
+    state.serverMedia = (data.videos || []).map(normalizeServerMedia);
+    resetVisibleMedia();
+    state.config = data.library || {
+      path: 'Configured media folder',
+      displayPath: 'Media folder',
+      available: true
+    };
+    setConnection(true, 'Local');
+  } catch (error) {
+    setConnection(false, 'Offline');
+    if (!quiet) showToast(`Could not connect to the media server: ${error.message}`, 'error');
+  } finally {
+    state.loading = false;
+    renderApp();
+  }
+}
+
+async function rescanMedia() {
+  if (dom.rescanBtn.disabled) return;
+  dom.rescanBtn.disabled = true;
+  dom.rescanBtn.classList.add('is-scanning');
+  try {
+    const data = await fetchJson('/scan', { method: 'POST' });
+    await loadMedia({ quiet: true });
+    if (data.available === false) {
+      showToast('The app media folder is unavailable.', 'error');
+    } else {
+      showToast(`Scan complete · ${data.inserted || 0} new · ${data.markedMissing || 0} offline`);
+    }
+  } catch (error) {
+    showToast(`Scan failed: ${error.message}`, 'error');
+  } finally {
+    dom.rescanBtn.disabled = false;
+    dom.rescanBtn.classList.remove('is-scanning');
+  }
+}
+
+function selectSection(section) {
+  state.section = section;
+  state.selectedTag = null;
+  resetVisibleMedia();
+  setSidebarOpen(false);
+  renderApp();
+}
+
+function selectTag(tag) {
+  state.section = 'all';
+  state.selectedTag = state.selectedTag === tag ? null : tag;
+  resetVisibleMedia();
+  setSidebarOpen(false);
+  renderApp();
+}
+
+function setView(view) {
+  state.view = view;
+  resetVisibleMedia();
+  try { localStorage.setItem('webvlc:view', view); } catch { /* preference storage is optional */ }
+  renderControls();
+  renderContent();
+}
+
+function setMediaFilter(filter) {
+  state.mediaFilter = filter;
+  resetVisibleMedia();
+  renderControls();
+  renderContent();
+}
+
+function updateSearch(value) {
+  state.search = value.trim();
+  dom.globalSearch.classList.toggle('has-value', Boolean(value));
+  if (searchRenderTimer) clearTimeout(searchRenderTimer);
+  const renderSearch = () => {
+    searchRenderTimer = null;
+    resetVisibleMedia();
+    renderHeading();
+    renderContent();
+  };
+  if (!value) renderSearch();
+  else searchRenderTimer = setTimeout(renderSearch, 80);
+}
+
+function resetLibrary() {
+  state.search = '';
+  state.section = 'all';
+  state.selectedTag = null;
+  state.mediaFilter = 'all';
+  resetVisibleMedia();
+  dom.searchInput.value = '';
+  dom.globalSearch.classList.remove('has-value');
+  renderApp();
+}
+
+function handleLibraryAction(action, id, trigger) {
+  const item = findMedia(id);
+  if (!item) return;
+  if (action === 'play') {
+    if (state.currentId === item.id) togglePlayback();
+    else openPlayer(item.id);
+  } else if (action === 'favorite') {
+    toggleFavorite(item.id);
+  } else if (action === 'menu') {
+    openContextMenu(item.id, trigger);
+  }
+}
+
+function openContextMenu(id, trigger) {
+  const item = findMedia(id);
+  if (!item) return;
+  state.contextId = item.id;
+  dom.contextMenu.hidden = false;
+  dom.contextMenu.querySelector('[data-menu-action="favorite"] span').textContent = item.favorite ? 'Remove favorite' : 'Add to favorites';
+  ['edit', 'native', 'delete'].forEach((action) => {
+    dom.contextMenu.querySelector(`[data-menu-action="${action}"]`).disabled = item.local;
+  });
+
+  document.querySelectorAll('[data-action="menu"].active').forEach((button) => button.classList.remove('active'));
+  trigger.classList.add('active');
+
+  const rect = trigger.getBoundingClientRect();
+  const menuWidth = 210;
+  const menuHeight = dom.contextMenu.offsetHeight;
+  const left = Math.min(Math.max(8, rect.right - menuWidth), window.innerWidth - menuWidth - 8);
+  let top = rect.bottom + 7;
+  if (top + menuHeight > window.innerHeight - 8) top = rect.top - menuHeight - 7;
+  dom.contextMenu.style.left = `${left}px`;
+  dom.contextMenu.style.top = `${Math.max(8, top)}px`;
+}
+
+function closeContextMenu() {
+  dom.contextMenu.hidden = true;
+  state.contextId = null;
+  document.querySelectorAll('[data-action="menu"].active').forEach((button) => button.classList.remove('active'));
+}
+
+async function toggleFavorite(id) {
+  const item = findMedia(id);
+  if (!item) return;
+  if (item.local) {
+    item.favorite = !item.favorite;
+    renderApp();
+    showToast(item.favorite ? 'Added to favorites for this session' : 'Removed from favorites');
+    return;
+  }
+
+  const previous = item.favorite;
+  item.favorite = !previous;
+  renderApp();
+  try {
+    const data = await fetchJson(`/favorite/${item.serverId}`, { method: 'POST' });
+    item.favorite = Boolean(data.favorite);
+  } catch (error) {
+    item.favorite = previous;
+    showToast(`Could not update favorite: ${error.message}`, 'error');
+  }
+  renderApp();
+}
+
+function openEditDialog(id) {
+  const item = findMedia(id);
+  if (!item || item.local) return;
+  state.editingId = item.id;
+  const parts = splitExtension(item.filename);
+  dom.editFilename.value = parts.base;
+  dom.editExtension.textContent = parts.extension;
+  dom.editTags.value = item.tags.join(', ');
+  dom.editDialog.showModal();
+  requestAnimationFrame(() => dom.editFilename.select());
+}
+
+async function saveEdit(event) {
+  event.preventDefault();
+  const item = findMedia(state.editingId);
+  if (!item || item.local) return;
+
+  const parts = splitExtension(item.filename);
+  const nextBase = dom.editFilename.value.trim();
+  const nextName = nextBase + parts.extension;
+  const nextTags = [...new Set(dom.editTags.value.split(',').map((tag) => tag.trim().toLowerCase()).filter(Boolean))];
+  if (!nextBase) {
+    showToast('Filename cannot be empty', 'error');
+    return;
+  }
+
+  dom.saveEditBtn.disabled = true;
+  try {
+    if (nextName !== item.filename) {
+      const renamed = await fetchJson(`/rename/${item.serverId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ newName: nextName })
+      });
+      item.filename = renamed.filename;
+      item.extension = extensionOf(renamed.filename);
+    }
+
+    const removed = item.tags.filter((tag) => !nextTags.includes(tag));
+    const added = nextTags.filter((tag) => !item.tags.includes(tag));
+    for (const tag of removed) {
+      await fetchJson(`/tags/${item.serverId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'remove', tag })
+      });
+    }
+    for (const tag of added) {
+      await fetchJson(`/tags/${item.serverId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'add', tag })
+      });
+    }
+    item.tags = nextTags;
+    dom.editDialog.close();
+    showToast('Media details saved');
+    renderApp();
+  } catch (error) {
+    showToast(`Could not save changes: ${error.message}`, 'error');
+    await loadMedia({ quiet: true });
+  } finally {
+    dom.saveEditBtn.disabled = false;
+  }
+}
+
+function openDeleteDialog(id) {
+  const item = findMedia(id);
+  if (!item || item.local) return;
+  state.deletingId = item.id;
+  dom.confirmFilename.textContent = item.filename;
+  dom.confirmDialog.showModal();
+}
+
+async function deleteMedia(event) {
+  event.preventDefault();
+  const item = findMedia(state.deletingId);
+  if (!item || item.local) return;
+  dom.confirmDeleteBtn.disabled = true;
+  try {
+    await fetchJson(`/delete/${item.serverId}`, { method: 'POST' });
+    state.serverMedia = state.serverMedia.filter((media) => media.id !== item.id);
+    if (state.currentId === item.id) closePlayer();
+    dom.confirmDialog.close();
+    showToast('File deleted from disk');
+    renderApp();
+  } catch (error) {
+    showToast(`Delete failed: ${error.message}`, 'error');
+  } finally {
+    dom.confirmDeleteBtn.disabled = false;
+  }
+}
+
+async function openInDesktop(id) {
+  const item = findMedia(id);
+  if (!item || item.local) return;
+  try {
+    await fetchJson(`/open/${item.serverId}`, { method: 'POST' });
+    showToast('Opening in your desktop player');
+  } catch (error) {
+    showToast(`Could not open the file: ${error.message}`, 'error');
+  }
+}
+
+function buildQueue(id) {
+  let items = getFilteredMedia();
+  if (!items.some((item) => item.id === id)) items = allMedia();
+  state.queue = items.map((item) => item.id);
+}
+
+function playerSource(item) {
+  return item.local ? item.url : `/video/${item.serverId}`;
+}
+
+function openPlayer(id, { expand = false, autoplay = true, preserveQueue = false } = {}) {
+  const item = findMedia(id);
+  if (!item) return;
+  if (!preserveQueue) buildQueue(item.id);
+  if (!state.queue.includes(item.id)) state.queue.push(item.id);
+
+  state.currentId = item.id;
+  dom.playerMessage.hidden = true;
+  dom.playerWindow.classList.remove('is-idle');
+  dom.playerWindow.classList.add('is-paused');
+  dom.videoCanvas.classList.toggle('is-audio', item.mediaType === 'audio');
+  dom.videoCanvas.classList.remove('is-playing');
+  dom.stageTitle.textContent = item.filename;
+  dom.playerTitle.textContent = item.filename;
+  dom.playerMeta.textContent = `${item.local ? 'This device' : 'Local library'} · ${(item.extension || item.mediaType).toUpperCase()}${item.size ? ` · ${formatBytes(item.size)}` : ''}`;
+  updatePlayerArtwork(item);
+
+  dom.playerVideo.pause();
+  dom.playerVideo.removeAttribute('src');
+  dom.playerVideo.load();
+  dom.playerVideo.src = playerSource(item);
+  dom.playerVideo.playbackRate = PLAYBACK_RATES[state.rateIndex];
+  dom.playerVideo.load();
+  resetTimeline();
+  lastMediaPositionBucket = -1;
+  setPlayerControlsEnabled(true);
+  dom.playerPipBtn.disabled = item.mediaType === 'audio' || !document.pictureInPictureEnabled;
+  renderQueue();
+  renderContent();
+  updateMediaSession(item);
+  requestLocalThumbnail(item);
+  if (expand) setPlayerExpanded(true);
+
+  if (autoplay) {
+    dom.playerVideo.play().catch(() => {
+      updatePlaybackUi(false);
+    });
+  }
+}
+
+function updatePlayerArtwork(item) {
+  const image = dom.playerArtwork.querySelector('img');
+  const glyph = dom.playerArtwork.querySelector('svg');
+  if (item.thumbnailUrl) {
+    image.src = item.thumbnailUrl;
+    image.hidden = false;
+    glyph.hidden = true;
+    image.onerror = () => {
+      image.hidden = true;
+      glyph.hidden = false;
+    };
+  } else {
+    image.removeAttribute('src');
+    image.hidden = true;
+    glyph.hidden = false;
+    glyph.querySelector('use')?.setAttribute('href', `#i-${item.mediaType === 'audio' ? 'music' : 'film'}`);
+  }
+}
+
+function setPlayerControlsEnabled(enabled) {
+  [
+    dom.playerPlayBtn, dom.canvasPlayBtn, dom.playerPrevBtn, dom.playerNextBtn,
+    dom.playerBackBtn, dom.playerForwardBtn, dom.playerSeek, dom.playerMuteBtn,
+    dom.playerVolume, dom.playbackRateBtn, dom.repeatBtn, dom.shuffleBtn,
+    dom.playerExpandBtn, dom.dockExpandBtn, dom.playerPipBtn, dom.playerFullscreenBtn
+  ].forEach((control) => { control.disabled = !enabled; });
+}
+
+function togglePlayback() {
+  if (!state.currentId) {
+    const first = getFilteredMedia()[0] || allMedia()[0];
+    if (first) openPlayer(first.id);
+    return;
+  }
+  if (dom.playerVideo.paused) dom.playerVideo.play().catch(() => {});
+  else dom.playerVideo.pause();
+}
+
+function updatePlaybackUi(isPlaying) {
+  dom.playerWindow.classList.toggle('is-paused', !isPlaying);
+  dom.videoCanvas.classList.toggle('is-playing', isPlaying);
+  dom.playerPlayBtn.classList.toggle('is-playing', isPlaying);
+  setButtonIcon(dom.playerPlayBtn, isPlaying ? 'pause' : 'play');
+  setButtonIcon(dom.canvasPlayBtn, isPlaying ? 'pause' : 'play');
+  dom.playerPlayBtn.setAttribute('aria-label', isPlaying ? 'Pause' : 'Play');
+  dom.canvasPlayBtn.setAttribute('aria-label', isPlaying ? 'Pause' : 'Play');
+  if ('mediaSession' in navigator) navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
+  document.querySelectorAll('.card-play use, .row-play use').forEach((use) => {
+    const owner = use.closest('[data-id]');
+    if (owner?.dataset.id === state.currentId) use.setAttribute('href', `#i-${isPlaying ? 'pause' : 'play'}`);
+  });
+  renderQueue();
+}
+
+function closePlayer() {
+  dom.playerVideo.pause();
+  dom.playerVideo.removeAttribute('src');
+  dom.playerVideo.load();
+  state.currentId = null;
+  state.queue = [];
+  setPlayerExpanded(false);
+  dom.playerWindow.className = 'player-shell is-idle';
+  dom.stageTitle.textContent = 'Nothing playing';
+  dom.playerTitle.textContent = 'No media selected';
+  dom.playerMeta.textContent = 'Ready';
+  dom.playerMessage.hidden = true;
+  dom.videoCanvas.classList.remove('is-audio', 'is-playing');
+  resetTimeline();
+  setPlayerControlsEnabled(false);
+  renderContent();
+  renderQueue();
+  if ('mediaSession' in navigator) navigator.mediaSession.metadata = null;
+}
+
+function setPlayerExpanded(expanded) {
+  if (!state.currentId && expanded) return;
+  state.expanded = Boolean(expanded);
+  dom.playerWindow.classList.toggle('is-expanded', state.expanded);
+  dom.body.classList.toggle('player-expanded', state.expanded);
+}
+
+function seekBy(seconds) {
+  if (!state.currentId || !Number.isFinite(dom.playerVideo.duration)) return;
+  dom.playerVideo.currentTime = Math.max(0, Math.min(dom.playerVideo.duration, dom.playerVideo.currentTime + seconds));
+}
+
+function queueIndex() {
+  return state.queue.indexOf(state.currentId);
+}
+
+function playAdjacent(direction) {
+  if (!state.queue.length) return;
+  let nextIndex;
+  if (state.shuffle && state.queue.length > 1) {
+    do {
+      nextIndex = Math.floor(Math.random() * state.queue.length);
+    } while (nextIndex === queueIndex());
+  } else {
+    nextIndex = (queueIndex() + direction + state.queue.length) % state.queue.length;
+  }
+  openPlayer(state.queue[nextIndex], { expand: state.expanded, preserveQueue: true });
+}
+
+function resetTimeline() {
+  dom.playerSeek.value = 0;
+  dom.playerSeek.style.setProperty('--fill', '0%');
+  dom.playerCurrentTime.textContent = '0:00';
+  dom.playerDuration.textContent = '0:00';
+}
+
+function updateTimeline() {
+  const duration = Number.isFinite(dom.playerVideo.duration) ? dom.playerVideo.duration : 0;
+  const current = Number.isFinite(dom.playerVideo.currentTime) ? dom.playerVideo.currentTime : 0;
+  const progress = duration ? (current / duration) * 1000 : 0;
+  dom.playerSeek.value = progress;
+  dom.playerSeek.style.setProperty('--fill', `${progress / 10}%`);
+  dom.playerCurrentTime.textContent = formatTime(current);
+  dom.playerDuration.textContent = formatTime(duration);
+}
+
+function updateVolumeUi() {
+  const volume = dom.playerVideo.muted ? 0 : Math.round(dom.playerVideo.volume * 100);
+  dom.playerVolume.value = volume;
+  dom.playerVolume.style.setProperty('--fill', `${volume}%`);
+  setButtonIcon(dom.playerMuteBtn, volume === 0 ? 'mute' : 'volume');
+  dom.playerMuteBtn.setAttribute('aria-label', volume === 0 ? 'Unmute' : 'Mute');
+}
+
+function renderQueue() {
+  const ids = state.currentId ? state.queue : [];
+  const currentIndex = Math.max(0, ids.indexOf(state.currentId));
+  const startIndex = Math.max(0, currentIndex - 5);
+  const renderedIds = ids.slice(startIndex, startIndex + MAX_RENDERED_QUEUE_ITEMS);
+  const items = renderedIds.map(findMedia).filter(Boolean);
+  dom.queueCount.textContent = `${ids.length} item${ids.length === 1 ? '' : 's'}`;
+  dom.queueList.innerHTML = items.map((item) => {
+    const active = item.id === state.currentId;
+    return `
+      <button class="queue-item${active ? ' active' : ''}" type="button" data-queue-id="${item.id}">
+        <span class="queue-thumb">${thumbnailMarkup(item)}</span>
+        <span class="queue-copy"><strong>${escapeHtml(item.filename)}</strong><small>${escapeHtml(item.extension || item.mediaType)}</small></span>
+        ${active && !dom.playerVideo.paused ? '<span class="queue-playing"><i></i><i></i><i></i></span>' : ''}
+      </button>`;
+  }).join('') + (ids.length > renderedIds.length
+    ? `<p class="queue-truncated">Showing ${items.length} of ${ids.length}</p>`
+    : '');
+  wireThumbnailFallbacks(dom.queueList);
+}
+
+function cyclePlaybackRate() {
+  state.rateIndex = (state.rateIndex + 1) % PLAYBACK_RATES.length;
+  const rate = PLAYBACK_RATES[state.rateIndex];
+  dom.playerVideo.playbackRate = rate;
+  dom.playbackRateBtn.textContent = `${rate}×`;
+  showToast(`Playback speed: ${rate}×`);
+}
+
+async function togglePictureInPicture() {
+  if (!state.currentId || !document.pictureInPictureEnabled || dom.playerVideo.readyState < 1) {
+    showToast('Picture in picture is not available for this media', 'error');
+    return;
+  }
+  try {
+    if (document.pictureInPictureElement) await document.exitPictureInPicture();
+    else await dom.playerVideo.requestPictureInPicture();
+  } catch (error) {
+    showToast(`Picture in picture failed: ${error.message}`, 'error');
+  }
+}
+
+async function toggleFullscreen() {
+  if (!state.currentId) return;
+  try {
+    if (document.fullscreenElement) {
+      await document.exitFullscreen();
+      return;
+    }
+    setPlayerExpanded(true);
+    await dom.videoCanvas.requestFullscreen();
+  } catch (error) {
+    showToast(`Fullscreen failed: ${error.message}`, 'error');
+  }
+}
+
+function updateMediaSession(item) {
+  if (!('mediaSession' in navigator) || typeof MediaMetadata === 'undefined') return;
+  const artwork = item.thumbnailUrl ? [{ src: new URL(item.thumbnailUrl, window.location.href).href }] : [];
+  navigator.mediaSession.metadata = new MediaMetadata({
+    title: item.filename,
+    artist: item.local ? 'This device' : 'web_vlc library',
+    album: item.tags.slice(0, 2).join(' · ') || 'Local media',
+    artwork
+  });
+}
+
+function updateMediaPositionState() {
+  if (!('mediaSession' in navigator) || !Number.isFinite(dom.playerVideo.duration) || dom.playerVideo.duration <= 0) return;
+  try {
+    navigator.mediaSession.setPositionState({
+      duration: dom.playerVideo.duration,
+      playbackRate: dom.playerVideo.playbackRate,
+      position: Math.min(dom.playerVideo.currentTime, dom.playerVideo.duration)
+    });
+  } catch {
+    // Some browsers reject position updates while media is loading.
+  }
+}
+
+function isSupportedFile(file) {
+  const extension = extensionOf(file.name);
+  return file.type.startsWith('video/') || file.type.startsWith('audio/') || VIDEO_EXTENSIONS.has(extension) || AUDIO_EXTENSIONS.has(extension);
+}
+
+function clearSessionMedia() {
+  const localIds = new Set(state.sessionMedia.map((item) => item.id));
+  if (localIds.has(state.currentId)) {
+    closePlayer();
+  } else {
+    state.queue = state.queue.filter((id) => !localIds.has(id));
+  }
+  for (let index = localThumbnailQueue.length - 1; index >= 0; index -= 1) {
+    if (localIds.has(localThumbnailQueue[index].item.id)) {
+      localThumbnailQueue[index].resolve(null);
+      localThumbnailQueue.splice(index, 1);
+    }
+  }
+  state.sessionMedia.forEach((item) => {
+    URL.revokeObjectURL(item.url);
+    if (item.thumbnailUrl?.startsWith('blob:')) URL.revokeObjectURL(item.thumbnailUrl);
+  });
+  state.sessionMedia = [];
+}
+
+async function addLocalFiles(fileList, { replace = false, folderName = null } = {}) {
+  const sources = [...fileList]
+    .map((entry) => entry?.file ? entry : { file: entry, relativePath: entry.name })
+    .filter((source) => isSupportedFile(source.file));
+  if (!sources.length) {
+    showToast('No supported audio or video files found', 'error');
+    return false;
+  }
+
+  if (replace) {
+    clearSessionMedia();
+    if (state.currentId) closePlayer();
+  }
+
+  const added = [];
+  for (let sourceIndex = 0; sourceIndex < sources.length; sourceIndex += 1) {
+    const { file, relativePath } = sources[sourceIndex];
+    const item = {
+      id: `local-${++state.localCounter}`,
+      serverId: null,
+      filename: relativePath || file.name,
+      tags: ['local'],
+      favorite: false,
+      hasThumbnail: false,
+      thumbnailUrl: null,
+      thumbnailQueued: false,
+      mediaType: file.type.startsWith('audio/') ? 'audio' : mediaTypeFrom(file.name),
+      extension: extensionOf(file.name),
+      size: file.size,
+      modifiedAt: file.lastModified ? new Date(file.lastModified).toISOString() : new Date().toISOString(),
+      available: true,
+      local: true,
+      file,
+      url: URL.createObjectURL(file)
+    };
+    state.sessionMedia.push(item);
+    added.push(item);
+    if (sourceIndex > 0 && sourceIndex % 250 === 0) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+  }
+
+  state.section = 'all';
+  state.selectedTag = null;
+  state.mediaFilter = 'all';
+  state.selectedFolderName = folderName || state.selectedFolderName;
+  resetVisibleMedia();
+  renderApp();
+  showToast(`${added.length} file${added.length === 1 ? '' : 's'} ${replace ? 'loaded from the selected folder' : 'added for this session'}`);
+  if (!replace) openPlayer(added[0].id);
+
+  return true;
+}
+
+function setFolderLoading(loading) {
+  const label = dom.chooseFolderBtn.querySelector('span');
+  const previousLabel = label?.textContent;
+  dom.chooseFolderBtn.classList.toggle('is-loading', loading);
+  dom.chooseFolderBtn.disabled = loading;
+  dom.emptyChooseFolderBtn.disabled = loading;
+  dom.body.classList.toggle('is-importing-folder', loading);
+  if (label) label.textContent = loading ? 'Reading folder…' : (previousLabel === 'Reading folder…' ? 'Choose media folder' : previousLabel);
+  setConnection(true, loading ? 'Reading…' : 'Local');
+}
+
+async function importFolderSources(sources, folderName) {
+  setFolderLoading(true);
+  await new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
+  try {
+    return await addLocalFiles(sources, { replace: true, folderName });
+  } finally {
+    setFolderLoading(false);
+  }
+}
+
+async function loadSelectedFolder(input) {
+  if (!input.files?.length) return;
+  const firstPath = input.files[0]?.webkitRelativePath || '';
+  const folderName = firstPath.split('/').filter(Boolean)[0] || 'Selected folder';
+  const sources = [...input.files].map((file) => ({
+    file,
+    relativePath: file.webkitRelativePath.split('/').slice(1).join('/') || file.name
+  }));
+  try {
+    await importFolderSources(sources, folderName);
+  } finally {
+    input.value = '';
+  }
+}
+
+function openSettingsDatabase() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(SETTINGS_DB_NAME, 1);
+    request.onupgradeneeded = () => request.result.createObjectStore(SETTINGS_STORE_NAME);
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function saveDirectoryHandle(handle) {
+  if (!('indexedDB' in window)) return;
+  const database = await openSettingsDatabase();
+  await new Promise((resolve, reject) => {
+    const transaction = database.transaction(SETTINGS_STORE_NAME, 'readwrite');
+    transaction.objectStore(SETTINGS_STORE_NAME).put(handle, 'media-directory');
+    transaction.oncomplete = resolve;
+    transaction.onerror = () => reject(transaction.error);
+  });
+  database.close();
+}
+
+async function savedDirectoryHandle() {
+  if (!('indexedDB' in window)) return null;
+  const database = await openSettingsDatabase();
+  const handle = await new Promise((resolve, reject) => {
+    const request = database.transaction(SETTINGS_STORE_NAME).objectStore(SETTINGS_STORE_NAME).get('media-directory');
+    request.onsuccess = () => resolve(request.result || null);
+    request.onerror = () => reject(request.error);
+  });
+  database.close();
+  return handle;
+}
+
+async function collectDirectoryFiles(directoryHandle, prefix = '', output = []) {
+  for await (const [name, entry] of directoryHandle.entries()) {
+    const relativePath = prefix ? `${prefix}/${name}` : name;
+    if (entry.kind === 'directory') {
+      await collectDirectoryFiles(entry, relativePath, output);
+    } else {
+      output.push({ file: await entry.getFile(), relativePath });
+      if (output.length % 100 === 0) await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+  }
+  return output;
+}
+
+async function importDirectoryHandle(handle) {
+  setFolderLoading(true);
+  try {
+    const sources = await collectDirectoryFiles(handle);
+    return await addLocalFiles(sources, { replace: true, folderName: handle.name });
+  } finally {
+    setFolderLoading(false);
+  }
+}
+
+async function chooseMediaFolder() {
+  if (!('showDirectoryPicker' in window)) {
+    dom.folderPicker.click();
+    return;
+  }
+  try {
+    const handle = await window.showDirectoryPicker({ id: 'webvlc-media', mode: 'read' });
+    await saveDirectoryHandle(handle).catch(() => {});
+    await importDirectoryHandle(handle);
+  } catch (error) {
+    if (error.name !== 'AbortError') {
+      showToast('The folder picker failed. Opening the fallback picker.', 'error');
+      dom.folderPicker.click();
+    }
+  }
+}
+
+async function restoreSavedDirectory() {
+  if (!('showDirectoryPicker' in window)) return;
+  try {
+    const handle = await savedDirectoryHandle();
+    if (!handle || await handle.queryPermission({ mode: 'read' }) !== 'granted') return;
+    await importDirectoryHandle(handle);
+  } catch {
+    // Storage and directory permissions are optional; the picker remains available.
+  }
+}
+
+function requestLocalThumbnail(item) {
+  if (!item?.local || item.mediaType !== 'video' || item.thumbnailUrl || item.thumbnailQueued) return;
+  item.thumbnailQueued = true;
+  queueLocalThumbnail(item).then((thumbnailUrl) => {
+    item.thumbnailQueued = false;
+    if (!thumbnailUrl) return;
+    if (!findMedia(item.id)) {
+      URL.revokeObjectURL(thumbnailUrl);
+      return;
+    }
+    item.thumbnailUrl = thumbnailUrl;
+    item.hasThumbnail = true;
+    if (state.currentId === item.id) {
+      updatePlayerArtwork(item);
+      updateMediaSession(item);
+    }
+    scheduleThumbnailRender();
+  });
+}
+
+function wireLocalThumbnailGeneration() {
+  localThumbnailObserver?.disconnect();
+  const candidates = [...dom.libraryContent.querySelectorAll('[data-id]')]
+    .map((element) => ({ element, item: findMedia(element.dataset.id) }))
+    .filter(({ item }) => item?.local && item.mediaType === 'video' && !item.thumbnailUrl && !item.thumbnailQueued);
+  if (!candidates.length) return;
+
+  if (!('IntersectionObserver' in window)) {
+    candidates.slice(0, 12).forEach(({ item }) => requestLocalThumbnail(item));
+    return;
+  }
+
+  localThumbnailObserver = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      if (!entry.isIntersecting) return;
+      const item = findMedia(entry.target.dataset.id);
+      requestLocalThumbnail(item);
+      localThumbnailObserver?.unobserve(entry.target);
+    });
+  }, { rootMargin: '240px 0px' });
+  candidates.forEach(({ element }) => localThumbnailObserver.observe(element));
+}
+
+function queueLocalThumbnail(item) {
+  return new Promise((resolve) => {
+    localThumbnailQueue.push({ item, resolve });
+    processLocalThumbnailQueue();
+  });
+}
+
+function processLocalThumbnailQueue() {
+  while (activeLocalThumbnailJobs < MAX_CONCURRENT_LOCAL_THUMBNAILS && localThumbnailQueue.length) {
+    const job = localThumbnailQueue.shift();
+    activeLocalThumbnailJobs += 1;
+    createLocalThumbnail(job.item)
+      .then(job.resolve)
+      .finally(() => {
+        activeLocalThumbnailJobs -= 1;
+        processLocalThumbnailQueue();
+      });
+  }
+}
+
+function scheduleThumbnailRender() {
+  if (thumbnailRenderTimer) return;
+  thumbnailRenderTimer = setTimeout(() => {
+    thumbnailRenderTimer = null;
+    renderContent();
+    renderQueue();
+  }, 80);
+}
+
+function createLocalThumbnail(item) {
+  return new Promise((resolve) => {
+    const video = document.createElement('video');
+    let settled = false;
+    let timeoutId;
+    const cleanup = () => {
+      video.removeAttribute('src');
+      video.load();
+    };
+    const finish = (thumbnailUrl) => {
+      if (settled) {
+        if (thumbnailUrl?.startsWith('blob:')) URL.revokeObjectURL(thumbnailUrl);
+        return;
+      }
+      settled = true;
+      clearTimeout(timeoutId);
+      cleanup();
+      resolve(thumbnailUrl);
+    };
+    const fail = () => finish(null);
+    video.muted = true;
+    video.preload = 'metadata';
+    video.src = item.url;
+    video.addEventListener('error', fail, { once: true });
+    video.addEventListener('loadedmetadata', () => {
+      video.currentTime = Math.min(1, Math.max(0, (video.duration || 1) * 0.08));
+    }, { once: true });
+    video.addEventListener('seeked', () => {
+      try {
+        const canvas = document.createElement('canvas');
+        const width = video.videoWidth || 16;
+        const height = video.videoHeight || 9;
+        const scale = Math.min(360 / width, 240 / height, 1);
+        canvas.width = Math.max(1, Math.round(width * scale));
+        canvas.height = Math.max(1, Math.round(height * scale));
+        canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob((blob) => {
+          finish(blob ? URL.createObjectURL(blob) : null);
+        }, 'image/jpeg', 0.78);
+      } catch {
+        fail();
+      }
+    }, { once: true });
+    timeoutId = setTimeout(fail, 6000);
+  });
+}
+
+function formatTime(seconds) {
+  if (!Number.isFinite(seconds) || seconds < 0) return '0:00';
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = Math.floor(seconds % 60);
+  if (hours) return `${hours}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  return `${minutes}:${String(secs).padStart(2, '0')}`;
+}
+
+function formatBytes(bytes) {
+  if (!bytes) return '';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  const value = bytes / (1024 ** index);
+  return `${value >= 10 || index === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[index]}`;
+}
+
+function formatRelativeDate(value) {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  const days = Math.floor((Date.now() - date.getTime()) / 86400000);
+  if (days <= 0) return 'Today';
+  if (days === 1) return 'Yesterday';
+  if (days < 7) return `${days} days ago`;
+  return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(date);
+}
+
+function showToast(message, type = 'success') {
+  const toast = document.createElement('div');
+  toast.className = `toast${type === 'error' ? ' error' : ''}`;
+  toast.innerHTML = `${icon(type === 'error' ? 'info' : 'check')}<span>${escapeHtml(message)}</span>`;
+  dom.toastRegion.appendChild(toast);
+  setTimeout(() => {
+    toast.classList.add('is-leaving');
+    setTimeout(() => toast.remove(), 200);
+  }, 3200);
+}
+
+// Library controls
+dom.searchInput.addEventListener('input', (event) => updateSearch(event.target.value));
+dom.clearSearchBtn.addEventListener('click', () => {
+  dom.searchInput.value = '';
+  updateSearch('');
+  dom.searchInput.focus();
+});
+document.querySelector('.brand').addEventListener('click', (event) => {
+  event.preventDefault();
+  resetLibrary();
+});
+document.querySelector('.sidebar-nav').addEventListener('click', (event) => {
+  const button = event.target.closest('[data-section]');
+  if (button) selectSection(button.dataset.section);
+});
+dom.tagNavigation.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-tag]');
+  if (button) selectTag(button.dataset.tag);
+});
+dom.mediaFilters.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-media-filter]');
+  if (button) setMediaFilter(button.dataset.mediaFilter);
+});
+dom.sortSelect.addEventListener('change', (event) => {
+  state.sort = event.target.value;
+  resetVisibleMedia();
+  try { localStorage.setItem('webvlc:sort', state.sort); } catch { /* preference storage is optional */ }
+  renderContent();
+});
+dom.viewGridBtn.addEventListener('click', () => setView('grid'));
+dom.viewListBtn.addEventListener('click', () => setView('list'));
+dom.rescanBtn.addEventListener('click', rescanMedia);
+dom.chooseFolderBtn.addEventListener('click', chooseMediaFolder);
+dom.emptyChooseFolderBtn.addEventListener('click', chooseMediaFolder);
+dom.filePicker.addEventListener('change', (event) => {
+  addLocalFiles(event.target.files);
+  event.target.value = '';
+});
+dom.folderPicker.addEventListener('change', (event) => loadSelectedFolder(event.target));
+dom.sidebarToggle.addEventListener('click', () => setSidebarOpen(!dom.body.classList.contains('sidebar-open')));
+dom.sidebarCloseBtn.addEventListener('click', () => setSidebarOpen(false));
+dom.sidebarScrim.addEventListener('pointerdown', () => setSidebarOpen(false));
+dom.sidebarScrim.addEventListener('click', () => setSidebarOpen(false));
+
+dom.libraryContent.addEventListener('click', (event) => {
+  const trigger = event.target.closest('[data-action]');
+  if (!trigger) return;
+  const owner = trigger.closest('[data-id]');
+  if (owner) handleLibraryAction(trigger.dataset.action, owner.dataset.id, trigger);
+});
+dom.libraryContent.addEventListener('keydown', (event) => {
+  if ((event.key === 'Enter' || event.key === ' ') && event.target.matches('[data-action="play"]')) {
+    event.preventDefault();
+    const owner = event.target.closest('[data-id]');
+    if (owner) handleLibraryAction('play', owner.dataset.id, event.target);
+  }
+});
+
+// Context menu
+dom.contextMenu.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-menu-action]');
+  const id = state.contextId;
+  if (!button || !id) return;
+  const action = button.dataset.menuAction;
+  closeContextMenu();
+  if (action === 'play') openPlayer(id);
+  if (action === 'favorite') toggleFavorite(id);
+  if (action === 'edit') openEditDialog(id);
+  if (action === 'native') openInDesktop(id);
+  if (action === 'delete') openDeleteDialog(id);
+});
+document.addEventListener('pointerdown', (event) => {
+  if (!dom.contextMenu.hidden && !dom.contextMenu.contains(event.target) && !event.target.closest('[data-action="menu"]')) closeContextMenu();
+});
+window.addEventListener('resize', closeContextMenu);
+window.addEventListener('scroll', closeContextMenu, { passive: true });
+
+// Dialogs
+document.querySelectorAll('[data-dialog-close]').forEach((button) => {
+  button.addEventListener('click', () => document.getElementById(button.dataset.dialogClose)?.close());
+});
+dom.editForm.addEventListener('submit', saveEdit);
+dom.confirmForm.addEventListener('submit', deleteMedia);
+[dom.editDialog, dom.confirmDialog].forEach((dialog) => {
+  dialog.addEventListener('click', (event) => {
+    if (event.target === dialog) dialog.close();
+  });
+});
+
+// Player controls
+dom.playerPlayBtn.addEventListener('click', togglePlayback);
+dom.canvasPlayBtn.addEventListener('click', togglePlayback);
+dom.playerVideo.addEventListener('click', togglePlayback);
+dom.playerVideo.addEventListener('dblclick', toggleFullscreen);
+dom.playerPrevBtn.addEventListener('click', () => playAdjacent(-1));
+dom.playerNextBtn.addEventListener('click', () => playAdjacent(1));
+dom.playerBackBtn.addEventListener('click', () => seekBy(-10));
+dom.playerForwardBtn.addEventListener('click', () => seekBy(10));
+dom.playerSeek.addEventListener('input', () => {
+  if (Number.isFinite(dom.playerVideo.duration)) dom.playerVideo.currentTime = (dom.playerSeek.value / 1000) * dom.playerVideo.duration;
+  dom.playerSeek.style.setProperty('--fill', `${dom.playerSeek.value / 10}%`);
+});
+dom.playerMuteBtn.addEventListener('click', () => {
+  dom.playerVideo.muted = !dom.playerVideo.muted;
+  updateVolumeUi();
+});
+dom.playerVolume.addEventListener('input', () => {
+  dom.playerVideo.volume = Number(dom.playerVolume.value) / 100;
+  dom.playerVideo.muted = Number(dom.playerVolume.value) === 0;
+  updateVolumeUi();
+});
+dom.playbackRateBtn.addEventListener('click', cyclePlaybackRate);
+dom.repeatBtn.addEventListener('click', () => {
+  state.repeat = !state.repeat;
+  dom.playerVideo.loop = state.repeat;
+  dom.repeatBtn.classList.toggle('active', state.repeat);
+  showToast(state.repeat ? 'Repeat on' : 'Repeat off');
+});
+dom.shuffleBtn.addEventListener('click', () => {
+  state.shuffle = !state.shuffle;
+  dom.shuffleBtn.classList.toggle('active', state.shuffle);
+  showToast(state.shuffle ? 'Shuffle on' : 'Shuffle off');
+});
+dom.playerExpandBtn.addEventListener('click', () => setPlayerExpanded(!state.expanded));
+dom.dockExpandBtn.addEventListener('click', () => setPlayerExpanded(true));
+dom.playerCollapseBtn.addEventListener('click', () => setPlayerExpanded(false));
+dom.playerCloseBtn.addEventListener('click', closePlayer);
+dom.playerPipBtn.addEventListener('click', togglePictureInPicture);
+dom.playerFullscreenBtn.addEventListener('click', toggleFullscreen);
+dom.queueList.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-queue-id]');
+  if (button) openPlayer(button.dataset.queueId, { expand: true, preserveQueue: true });
+});
+
+dom.playerVideo.addEventListener('play', () => updatePlaybackUi(true));
+dom.playerVideo.addEventListener('pause', () => updatePlaybackUi(false));
+dom.playerVideo.addEventListener('loadedmetadata', () => {
+  updateTimeline();
+  updateMediaPositionState();
+});
+dom.playerVideo.addEventListener('timeupdate', () => {
+  updateTimeline();
+  const positionBucket = Math.floor(dom.playerVideo.currentTime / 5);
+  if (positionBucket !== lastMediaPositionBucket) {
+    lastMediaPositionBucket = positionBucket;
+    updateMediaPositionState();
+  }
+});
+dom.playerVideo.addEventListener('ended', () => {
+  if (!state.repeat && state.queue.length > 1) playAdjacent(1);
+});
+dom.playerVideo.addEventListener('error', () => {
+  if (!state.currentId) return;
+  dom.playerMessage.hidden = false;
+  updatePlaybackUi(false);
+});
+dom.playerVideo.addEventListener('volumechange', updateVolumeUi);
+document.addEventListener('fullscreenchange', () => {
+  if (!document.fullscreenElement && state.expanded) setPlayerExpanded(false);
+});
+
+// Keyboard controls
+document.addEventListener('keydown', (event) => {
+  const typing = event.target.matches('input, textarea, select') || event.target.closest('dialog');
+  if (typing) {
+    if (event.key === 'Escape' && event.target === dom.searchInput) {
+      dom.searchInput.value = '';
+      updateSearch('');
+      dom.searchInput.blur();
+    }
+    return;
+  }
+
+  if (event.key === '/') {
+    event.preventDefault();
+    dom.searchInput.focus();
+    dom.searchInput.select();
+  } else if (event.key === ' ' && state.currentId) {
+    event.preventDefault();
+    togglePlayback();
+  } else if (event.key === 'ArrowLeft' && state.currentId) {
+    event.preventDefault();
+    seekBy(event.ctrlKey || event.metaKey ? -30 : -5);
+  } else if (event.key === 'ArrowRight' && state.currentId) {
+    event.preventDefault();
+    seekBy(event.ctrlKey || event.metaKey ? 30 : 5);
+  } else if ((event.key === 'm' || event.key === 'M') && state.currentId) {
+    dom.playerMuteBtn.click();
+  } else if ((event.key === 'f' || event.key === 'F') && state.currentId) {
+    event.preventDefault();
+    toggleFullscreen();
+  } else if ((event.key === 'n' || event.key === 'N') && state.currentId) {
+    playAdjacent(1);
+  } else if ((event.key === 'p' || event.key === 'P') && state.currentId) {
+    playAdjacent(-1);
+  } else if (event.key === 'Escape') {
+    closeContextMenu();
+    setSidebarOpen(false);
+    if (state.expanded && !document.fullscreenElement) setPlayerExpanded(false);
+  }
+});
+
+// Drag and drop local media
+window.addEventListener('dragenter', (event) => {
+  if (![...event.dataTransfer.types].includes('Files')) return;
+  event.preventDefault();
+  state.dragDepth += 1;
+  dom.dropOverlay.classList.add('active');
+});
+window.addEventListener('dragover', (event) => {
+  if ([...event.dataTransfer.types].includes('Files')) event.preventDefault();
+});
+window.addEventListener('dragleave', (event) => {
+  event.preventDefault();
+  state.dragDepth = Math.max(0, state.dragDepth - 1);
+  if (state.dragDepth === 0) dom.dropOverlay.classList.remove('active');
+});
+window.addEventListener('drop', (event) => {
+  event.preventDefault();
+  state.dragDepth = 0;
+  dom.dropOverlay.classList.remove('active');
+  addLocalFiles(event.dataTransfer.files);
+});
+window.addEventListener('beforeunload', () => {
+  state.sessionMedia.forEach((item) => URL.revokeObjectURL(item.url));
+});
+
+if ('mediaSession' in navigator) {
+  const safeHandler = (action, handler) => {
+    try { navigator.mediaSession.setActionHandler(action, handler); } catch { /* unsupported action */ }
+  };
+  safeHandler('play', () => dom.playerVideo.play());
+  safeHandler('pause', () => dom.playerVideo.pause());
+  safeHandler('previoustrack', () => playAdjacent(-1));
+  safeHandler('nexttrack', () => playAdjacent(1));
+  safeHandler('seekbackward', (details) => seekBy(-(details.seekOffset || 10)));
+  safeHandler('seekforward', (details) => seekBy(details.seekOffset || 10));
+  safeHandler('seekto', (details) => { dom.playerVideo.currentTime = details.seekTime || 0; });
+}
+
+// Boot
+setPlayerControlsEnabled(false);
+dom.sortSelect.value = state.sort;
+dom.playerVideo.volume = 0.85;
+updateVolumeUi();
+renderControls();
+loadMedia().then(restoreSavedDirectory);
