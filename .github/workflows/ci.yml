@@ -1,0 +1,42 @@
+name: Check web_vlc
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - run: npm run lint
+      - run: npm test
+
+      - name: Test a 1,000-item library in Windows Edge
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/windows-browser-smoke.ps1
+
+      - name: Verify the npm package contents
+        if: runner.os == 'Linux'
+        run: |
+          npm pack --dry-run 2>&1 | tee /tmp/npm-pack.txt
+          grep -q 'start.js' /tmp/npm-pack.txt
+          grep -q 'public/app.js' /tmp/npm-pack.txt
+          if grep -qE 'edits\.db|library\.db|thumbnails/' /tmp/npm-pack.txt; then
+            echo 'Runtime data leaked into the npm package.' >&2
+            exit 1
+          fi

@@ -1,0 +1,452 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f6f6f7" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#121317" media="(prefers-color-scheme: dark)">
+  <meta name="color-scheme" content="light dark">
+  <meta name="description" content="web_vlc — a private media library and player for this machine.">
+  <title>web_vlc — private media library</title>
+  <script>
+    (function () {
+      try {
+        const stored = JSON.parse(localStorage.getItem('webvlc:prefs') || '{}') || {};
+        const root = document.documentElement;
+        const theme = stored.theme === 'light' || stored.theme === 'dark'
+          ? stored.theme
+          : (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        root.dataset.theme = theme;
+        if (['orange', 'blue', 'violet', 'green', 'rose'].includes(stored.accent)) root.dataset.accent = stored.accent;
+        if (stored.density === 'compact') root.dataset.density = 'compact';
+        if (stored.glass === false) root.dataset.glass = 'off';
+        if (stored.reduceMotion === true) root.dataset.motion = 'reduce';
+      } catch {
+        document.documentElement.dataset.theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      }
+    })();
+  </script>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css?v=1.0.0">
+</head>
+<body>
+  <svg class="icon-sprite" aria-hidden="true">
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.8" cy="10.8" r="6.3"/><path d="m16 16 4.2 4.2"/></symbol>
+    <symbol id="i-star" viewBox="0 0 24 24"><path d="m12 3.5 2.6 5.3 5.9.9-4.2 4.1.9 5.9-5.2-2.8-5.2 2.8.9-5.9L3.5 9.7l5.9-.9z"/></symbol>
+    <symbol id="i-tag" viewBox="0 0 24 24"><path d="M4 5.5V12l7.7 7.7a1.8 1.8 0 0 0 2.6 0l5.4-5.4a1.8 1.8 0 0 0 0-2.6L12 4H5.5A1.5 1.5 0 0 0 4 5.5Z"/><circle cx="8.2" cy="8.2" r="1.2"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M18.2 9A7.5 7.5 0 0 0 5.5 6.5L4 8m2 7a7.5 7.5 0 0 0 12.5 2.5L20 16"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 7h8.5M18 7h2M4 17h2M9.5 17H20"/><circle cx="15.2" cy="7" r="2.4"/><circle cx="6.8" cy="17" r="2.4"/></symbol>
+    <symbol id="i-grid" viewBox="0 0 24 24"><rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><rect x="14" y="14" width="6" height="6" rx="1"/></symbol>
+    <symbol id="i-list" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11"/><circle cx="5" cy="6" r="1"/><circle cx="5" cy="12" r="1"/><circle cx="5" cy="18" r="1"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path class="icon-fill" d="M7.5 4.8v14.4L19 12z"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><path class="icon-fill" d="M6.5 5h4v14h-4zM13.5 5h4v14h-4z"/></symbol>
+    <symbol id="i-prev" viewBox="0 0 24 24"><path class="icon-fill" d="M6 5h2.5v14H6zM9.5 12 19 5.5v13z"/></symbol>
+    <symbol id="i-next" viewBox="0 0 24 24"><path class="icon-fill" d="M15.5 5H18v14h-2.5zM5 5.5 14.5 12 5 18.5z"/></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24"><path d="M3.5 12a8.5 8.5 0 1 0 8.5-8.5 9.2 9.2 0 0 0-6.37 2.59L3.5 8"/><path d="M3.5 3.5v4.5H8"/></symbol>
+    <symbol id="i-forward" viewBox="0 0 24 24"><path d="M20.5 12a8.5 8.5 0 1 1-8.5-8.5 9.2 9.2 0 0 1 6.37 2.59L20.5 8"/><path d="M20.5 3.5V8H16"/></symbol>
+    <symbol id="i-volume" viewBox="0 0 24 24"><path class="icon-fill" d="M4 9h4l5-4v14l-5-4H4z"/><path d="M16 9a4.5 4.5 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11"/></symbol>
+    <symbol id="i-mute" viewBox="0 0 24 24"><path class="icon-fill" d="M4 9h4l5-4v14l-5-4H4z"/><path d="m16.5 9 4 6m0-6-4 6"/></symbol>
+    <symbol id="i-expand" viewBox="0 0 24 24"><path d="M8.5 4H4v4.5M15.5 4H20v4.5M20 15.5V20h-4.5M8.5 20H4v-4.5"/></symbol>
+    <symbol id="i-pip" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="14" rx="2"/><rect class="icon-fill" x="11.5" y="11" width="6.5" height="5" rx=".8"/></symbol>
+    <symbol id="i-repeat" viewBox="0 0 24 24"><path d="M17 3.5 20.5 7 17 10.5M20 7H8a4 4 0 0 0-4 4M7 20.5 3.5 17 7 13.5M4 17h12a4 4 0 0 0 4-4"/></symbol>
+    <symbol id="i-shuffle" viewBox="0 0 24 24"><path d="M17 3.5 20.5 7 17 10.5M3.5 7H7c5 0 5 10 10 10h3.5M17 13.5l3.5 3.5-3.5 3.5M3.5 17H7c1.4 0 2.5-.8 3.4-2"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24"><circle class="icon-fill" cx="5" cy="12" r="1.5"/><circle class="icon-fill" cx="12" cy="12" r="1.5"/><circle class="icon-fill" cx="19" cy="12" r="1.5"/></symbol>
+    <symbol id="i-external" viewBox="0 0 24 24"><path d="M13 5h6v6M19 5l-8 8"/><path d="M18 14v4a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h4"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24"><path d="m14.5 5.5 4 4M5 19l1-4 9.8-9.8a1.8 1.8 0 0 1 2.6 0l.4.4a1.8 1.8 0 0 1 0 2.6L9 18z"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 4h6l1 3M7 7l1 13h8l1-13M10 10v6M14 10v6"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3.5 7a2 2 0 0 1 2-2H10l2 2h6.5a2 2 0 0 1 2 2v8.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/></symbol>
+    <symbol id="i-film" viewBox="0 0 24 24"><rect x="3.5" y="4" width="17" height="16" rx="2"/><path d="M8 4v16M16 4v16M3.5 9h4.5M16 9h4.5M3.5 15h4.5M16 15h4.5"/></symbol>
+    <symbol id="i-music" viewBox="0 0 24 24"><path d="M9 17V6l10-2v11"/><circle cx="6.5" cy="17.5" r="2.5"/><circle cx="16.5" cy="15.5" r="2.5"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.2"/></symbol>
+    <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></symbol>
+  </svg>
+
+  <div class="app-shell">
+    <header class="topbar">
+      <a class="brand" id="brandLink" href="#" aria-label="web_vlc home">
+        <svg class="cone-mark" viewBox="0 0 44 48" role="img" aria-label="web_vlc logo">
+          <path class="cone-shadow" d="M6 40.5h32l3 4.5H3z"/>
+          <path class="cone-base" d="M9 34h26l3.5 7H5.5z"/>
+          <path class="cone-orange" d="M21.8 2.5c1 0 1.8.6 2.2 1.5l12 30H8L20 4c.4-.9 1-1.5 1.8-1.5Z"/>
+          <path class="cone-stripe" d="m15.4 15.5 13.2-.1 2.5 6.2-18.2.1zM10.5 27.8h23l2.5 6.2H8z"/>
+          <path class="cone-shine" d="M21.6 5.5 11.4 32H16L23 5.5Z"/>
+        </svg>
+        <span class="brand-name">web_vlc</span>
+      </a>
+
+      <div class="search" id="searchWrap" role="search">
+        <svg><use href="#i-search"/></svg>
+        <input id="searchInput" type="search" autocomplete="off" placeholder="Search your library" aria-label="Search videos and tags">
+        <button class="search-clear" id="clearSearchBtn" type="button" aria-label="Clear search" hidden>
+          <svg><use href="#i-close"/></svg>
+        </button>
+      </div>
+
+      <div class="topbar-actions">
+        <button class="button button-primary" id="addFolderBtn" type="button">
+          <svg><use href="#i-plus"/></svg>
+          <span>Add folder</span>
+        </button>
+        <button class="icon-button" id="settingsBtn" type="button" aria-label="Settings" title="Settings">
+          <svg><use href="#i-settings"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <div class="app-body">
+      <section class="player-pane is-idle" id="playerWindow" aria-label="Media player">
+        <div class="stage">
+          <div class="video-canvas" id="videoCanvas">
+            <video id="playerVideo" playsinline preload="metadata"></video>
+            <div class="audio-visual" id="audioVisual" aria-hidden="true">
+              <div class="audio-art"><svg><use href="#i-music"/></svg></div>
+              <div class="sound-bars"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+            </div>
+            <button class="canvas-play" id="canvasPlayBtn" type="button" aria-label="Play"><svg><use href="#i-play"/></svg></button>
+            <div class="player-message" id="playerMessage" hidden>
+              <svg><use href="#i-info"/></svg>
+              <strong id="playerMessageTitle">Unable to play this file</strong>
+              <span id="playerMessageDetail">The file may be offline or use a codec your browser does not support.</span>
+              <button class="button" id="playerNativeBtn" type="button" hidden>Open in desktop player</button>
+            </div>
+          </div>
+
+          <div class="stage-idle">
+            <strong>Pick something to play</strong>
+            <span>Your library is on the left. Videos and audio play right here.</span>
+          </div>
+
+          <aside class="queue-panel" id="queuePanel" aria-label="Up next">
+            <div class="queue-heading">
+              <span>Up next</span>
+              <span class="queue-heading-side">
+                <strong id="queueCount">0 items</strong>
+                <button class="icon-button queue-close" id="queueCloseBtn" type="button" aria-label="Close queue"><svg><use href="#i-close"/></svg></button>
+              </span>
+            </div>
+            <div class="queue-list" id="queueList"></div>
+          </aside>
+        </div>
+
+        <div class="player-controls">
+          <div class="seek-row">
+            <span id="playerCurrentTime">0:00</span>
+            <input id="playerSeek" class="range seek-range" type="range" value="0" min="0" max="1000" step="1" aria-label="Seek">
+            <span id="playerDuration">0:00</span>
+          </div>
+          <div class="control-row">
+            <div class="now-playing">
+              <span class="now-playing-art" id="playerArtwork"><svg><use href="#i-film"/></svg><img alt="" hidden></span>
+              <span class="now-playing-copy">
+                <strong id="playerTitle">No media selected</strong>
+                <small id="playerMeta">Ready</small>
+              </span>
+            </div>
+
+            <div class="transport">
+              <button class="transport-button quiet" id="shuffleBtn" type="button" title="Shuffle" aria-label="Shuffle"><svg><use href="#i-shuffle"/></svg></button>
+              <button class="transport-button" id="playerPrevBtn" type="button" title="Previous (P)" aria-label="Previous"><svg><use href="#i-prev"/></svg></button>
+              <button class="transport-button seek-jump" id="playerBackBtn" type="button" title="Back 10 seconds" aria-label="Back 10 seconds"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-back"/><text class="icon-text" x="12" y="12.4" text-anchor="middle" dominant-baseline="central">10</text></svg></button>
+              <button class="play-button" id="playerPlayBtn" type="button" title="Play or pause (Space)" aria-label="Play"><svg><use href="#i-play"/></svg></button>
+              <button class="transport-button seek-jump" id="playerForwardBtn" type="button" title="Forward 10 seconds" aria-label="Forward 10 seconds"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-forward"/><text class="icon-text" x="12" y="12.4" text-anchor="middle" dominant-baseline="central">10</text></svg></button>
+              <button class="transport-button" id="playerNextBtn" type="button" title="Next (N)" aria-label="Next"><svg><use href="#i-next"/></svg></button>
+              <button class="transport-button quiet" id="repeatBtn" type="button" title="Repeat" aria-label="Repeat"><svg><use href="#i-repeat"/></svg></button>
+            </div>
+
+            <div class="utilities">
+              <div class="rate-control" id="rateControl">
+                <button class="rate-button" id="playbackRateBtn" type="button" title="Playback speed" aria-haspopup="true" aria-expanded="false">1×</button>
+                <div class="rate-popover" id="ratePopover" hidden>
+                  <div class="rate-head"><span>Playback speed</span><strong id="rateValue">1×</strong></div>
+                  <input id="playbackRateRange" class="range rate-range" type="range" min="0.5" max="2" step="0.05" value="1" aria-label="Playback speed">
+                  <div class="rate-presets" id="ratePresets">
+                    <button type="button" data-rate="0.5">0.5×</button>
+                    <button type="button" data-rate="0.75">0.75×</button>
+                    <button type="button" data-rate="1">1×</button>
+                    <button type="button" data-rate="1.25">1.25×</button>
+                    <button type="button" data-rate="1.5">1.5×</button>
+                    <button type="button" data-rate="2">2×</button>
+                  </div>
+                </div>
+              </div>
+              <button class="transport-button" id="playerMuteBtn" type="button" title="Mute (M)" aria-label="Mute"><svg><use href="#i-volume"/></svg></button>
+              <input id="playerVolume" class="range volume-range" type="range" value="85" min="0" max="100" step="1" aria-label="Volume">
+              <button class="transport-button queue-toggle" id="queueToggleBtn" type="button" title="Up next" aria-label="Up next" disabled>
+                <svg><use href="#i-list"/></svg>
+                <span class="queue-badge" id="queueBadge" hidden>0</span>
+              </button>
+              <button class="transport-button pip-button" id="playerPipBtn" type="button" title="Picture in picture" aria-label="Picture in picture"><svg><use href="#i-pip"/></svg></button>
+              <button class="transport-button" id="playerFullscreenBtn" type="button" title="Fullscreen (F)" aria-label="Fullscreen"><svg><use href="#i-expand"/></svg></button>
+              <button class="transport-button" id="playerCloseBtn" type="button" title="Stop" aria-label="Stop player"><svg><use href="#i-close"/></svg></button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <main class="library-pane" id="libraryPane">
+        <div class="pane-tools">
+          <div class="filter-chips" id="mediaFilters">
+            <button class="chip active" type="button" data-media-filter="all">All</button>
+            <button class="chip" type="button" data-media-filter="video"><svg><use href="#i-film"/></svg>Video</button>
+            <button class="chip" type="button" data-media-filter="audio"><svg><use href="#i-music"/></svg>Audio</button>
+            <button class="chip" type="button" data-media-filter="favorites"><svg><use href="#i-star"/></svg>Favorites</button>
+          </div>
+          <div class="pane-meta">
+            <span class="result-count" id="resultCount" aria-live="polite">0 items</span>
+            <label class="sort-control">
+              <select id="sortSelect" aria-label="Sort media">
+                <option value="name-asc">Name A–Z</option>
+                <option value="name-desc">Name Z–A</option>
+                <option value="newest">Recently added</option>
+                <option value="favorites">Favorites first</option>
+              </select>
+            </label>
+            <div class="view-switch" role="group" aria-label="Change library view">
+              <button id="viewGridBtn" class="active" type="button" data-view="grid" aria-label="Grid view" aria-pressed="true"><svg><use href="#i-grid"/></svg></button>
+              <button id="viewListBtn" type="button" data-view="list" aria-label="List view" aria-pressed="false"><svg><use href="#i-list"/></svg></button>
+            </div>
+          </div>
+        </div>
+
+        <section class="tag-bar" id="tagBar" aria-label="Tags" hidden></section>
+
+        <div class="library-scroll">
+          <section id="loading" class="skeleton-grid" aria-label="Loading media">
+            <div class="skeleton-card" aria-hidden="true"></div>
+            <div class="skeleton-card" aria-hidden="true"></div>
+            <div class="skeleton-card" aria-hidden="true"></div>
+            <div class="skeleton-card" aria-hidden="true"></div>
+            <div class="skeleton-card" aria-hidden="true"></div>
+            <div class="skeleton-card" aria-hidden="true"></div>
+          </section>
+
+          <section id="libraryContent" class="library-content"></section>
+
+          <section id="emptyState" class="empty-state" hidden>
+            <div class="empty-cone" aria-hidden="true">
+              <svg viewBox="0 0 44 48"><path d="M6 40.5h32l3 4.5H3z"/><path d="M9 34h26l3.5 7H5.5z"/><path d="M21.8 2.5c1 0 1.8.6 2.2 1.5l12 30H8L20 4c.4-.9 1-1.5 1.8-1.5Z"/><path class="stripe" d="m15.4 15.5 13.2-.1 2.5 6.2-18.2.1zM10.5 27.8h23l2.5 6.2H8z"/></svg>
+            </div>
+            <h2 id="emptyTitle">Add a media folder</h2>
+            <p id="emptyMessage">web_vlc indexes everything inside the folder you pick — subfolders included. Nothing leaves this machine.</p>
+            <div class="empty-actions">
+              <button class="button button-primary" id="emptyAddFolderBtn" type="button"><svg><use href="#i-folder"/></svg> Add media folder</button>
+            </div>
+            <p class="empty-hint" id="emptyHint">Videos and audio play right in your browser.</p>
+          </section>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <div class="context-menu" id="contextMenu" role="menu" hidden>
+    <button type="button" role="menuitem" data-menu-action="play"><svg><use href="#i-play"/></svg> Play now</button>
+    <button type="button" role="menuitem" data-menu-action="favorite"><svg><use href="#i-star"/></svg> <span>Add to favorites</span></button>
+    <button type="button" role="menuitem" data-menu-action="edit"><svg><use href="#i-edit"/></svg> Edit details</button>
+    <button type="button" role="menuitem" data-menu-action="native"><svg><use href="#i-external"/></svg> Open in desktop player</button>
+    <div class="menu-separator"></div>
+    <button class="danger-item" type="button" role="menuitem" data-menu-action="delete"><svg><use href="#i-trash"/></svg> Delete from disk</button>
+  </div>
+
+  <dialog class="modal" id="editDialog">
+    <form id="editForm" method="dialog">
+      <div class="modal-heading">
+        <h2>Edit item</h2>
+        <button class="icon-button" type="button" data-dialog-close="editDialog" aria-label="Close"><svg><use href="#i-close"/></svg></button>
+      </div>
+      <label class="form-field">
+        <span>Name</span>
+        <div class="filename-field"><input id="editFilename" type="text" maxlength="240" autocomplete="off"><span id="editExtension">.mp4</span></div>
+      </label>
+      <label class="form-field">
+        <span>Tags <small>separate with commas</small></span>
+        <input id="editTags" type="text" maxlength="500" autocomplete="off" placeholder="music, favorites, project name">
+      </label>
+      <div class="modal-actions">
+        <button class="button" type="button" data-dialog-close="editDialog">Cancel</button>
+        <button class="button button-primary" id="saveEditBtn" type="submit"><svg><use href="#i-check"/></svg> Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="modal confirm-modal" id="confirmDialog">
+    <form id="confirmForm" method="dialog">
+      <div class="danger-mark"><svg><use href="#i-trash"/></svg></div>
+      <h2>Delete this file?</h2>
+      <p>This permanently removes <strong id="confirmFilename"></strong> from your disk. This cannot be undone.</p>
+      <div class="modal-actions">
+        <button class="button" type="button" data-dialog-close="confirmDialog">Keep file</button>
+        <button class="button button-danger" id="confirmDeleteBtn" type="submit">Delete permanently</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="modal settings-modal" id="settingsDialog">
+    <div class="settings-head">
+      <div>
+        <h2>Settings</h2>
+        <p class="settings-sub">Tune the player to your taste.</p>
+      </div>
+      <button class="icon-button" type="button" data-dialog-close="settingsDialog" aria-label="Close"><svg><use href="#i-close"/></svg></button>
+    </div>
+
+    <div class="settings-body">
+      <section class="settings-section">
+        <div class="settings-section-head">
+          <h3>Appearance</h3>
+          <p>Theme, color, and how the interface feels.</p>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-copy">
+            <strong>Theme</strong>
+            <small>Follow your system or pick one.</small>
+          </div>
+          <div class="segmented" id="themeControl" role="group" aria-label="Theme">
+            <button type="button" data-theme-choice="system">System</button>
+            <button type="button" data-theme-choice="light">Light</button>
+            <button type="button" data-theme-choice="dark">Dark</button>
+          </div>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-copy">
+            <strong>Accent</strong>
+            <small>The color of controls and highlights.</small>
+          </div>
+          <div class="swatches" id="accentControl" role="group" aria-label="Accent color">
+            <button class="swatch" type="button" data-accent-choice="orange" aria-label="Orange" style="--swatch:#e85d04"></button>
+            <button class="swatch" type="button" data-accent-choice="blue" aria-label="Blue" style="--swatch:#2563eb"></button>
+            <button class="swatch" type="button" data-accent-choice="violet" aria-label="Violet" style="--swatch:#7c3aed"></button>
+            <button class="swatch" type="button" data-accent-choice="green" aria-label="Green" style="--swatch:#15803d"></button>
+            <button class="swatch" type="button" data-accent-choice="rose" aria-label="Rose" style="--swatch:#db2777"></button>
+          </div>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-copy">
+            <strong>Library density</strong>
+            <small>How tightly cards pack into the grid.</small>
+          </div>
+          <div class="segmented" id="densityControl" role="group" aria-label="Library density">
+            <button type="button" data-density-choice="comfortable">Comfortable</button>
+            <button type="button" data-density-choice="compact">Compact</button>
+          </div>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-copy">
+            <strong>Glass effects</strong>
+            <small>Blurred surfaces. Turn off for maximum performance.</small>
+          </div>
+          <button class="switch" id="glassToggle" type="button" role="switch" aria-checked="true" aria-label="Glass effects"><span aria-hidden="true"></span></button>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-copy">
+            <strong>Reduce motion</strong>
+            <small>Calmer transitions and animations.</small>
+          </div>
+          <button class="switch" id="motionToggle" type="button" role="switch" aria-checked="false" aria-label="Reduce motion"><span aria-hidden="true"></span></button>
+        </div>
+      </section>
+
+      <section class="settings-section">
+        <div class="settings-section-head">
+          <h3>Playback</h3>
+          <p>How the player responds to you.</p>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-copy">
+            <strong>Skip step</strong>
+            <small>Seconds for the rewind and forward buttons.</small>
+          </div>
+          <div class="segmented" id="seekStepControl" role="group" aria-label="Skip step">
+            <button type="button" data-seek-step="5">5s</button>
+            <button type="button" data-seek-step="10">10s</button>
+            <button type="button" data-seek-step="15">15s</button>
+            <button type="button" data-seek-step="30">30s</button>
+          </div>
+        </div>
+
+        <div class="setting-row setting-row-stack">
+          <div class="setting-copy">
+            <strong>Default speed</strong>
+            <small>Applied to every video you open.</small>
+          </div>
+          <div class="settings-range-row">
+            <input id="settingsRate" class="range" type="range" min="0.5" max="2" step="0.05" value="1" aria-label="Default playback speed">
+            <output id="settingsRateValue" for="settingsRate">1×</output>
+          </div>
+        </div>
+      </section>
+
+      <section class="settings-section">
+        <div class="settings-section-head">
+          <h3>Library</h3>
+          <p>Where your media lives.</p>
+        </div>
+        <div class="folder-list" id="folderList"></div>
+        <div class="settings-actions">
+          <button class="button button-primary" id="addFolderSettingsBtn" type="button"><svg><use href="#i-plus"/></svg> Add folder…</button>
+          <button class="button" id="rescanBtn" type="button"><svg><use href="#i-refresh"/></svg> Rescan</button>
+        </div>
+        <form class="path-form" id="folderPathForm">
+          <label class="form-field">
+            <span>Or type a folder path</span>
+            <div class="path-row">
+              <input id="folderPathInput" type="text" autocomplete="off" spellcheck="false" placeholder="~/Videos or D:\Media">
+              <button class="button" id="addPathBtn" type="submit">Add</button>
+            </div>
+            <small>Or type any folder path directly.</small>
+          </label>
+        </form>
+      </section>
+
+      <section class="settings-section">
+        <div class="settings-section-head">
+          <h3>System</h3>
+          <p>Local engine status.</p>
+        </div>
+        <p class="settings-status" id="ffmpegStatus"></p>
+      </section>
+    </div>
+  </dialog>
+
+  <dialog class="modal browser-modal" id="folderBrowserDialog">
+    <div class="modal-heading">
+      <h2>Add media folder</h2>
+      <button class="icon-button" type="button" data-dialog-close="folderBrowserDialog" aria-label="Close"><svg><use href="#i-close"/></svg></button>
+    </div>
+    <p class="browser-hint">Pick any folder on this machine — web_vlc indexes the videos and music inside it, subfolders included.</p>
+    <form class="browser-path-form" id="browserPathForm">
+      <div class="path-row">
+        <input id="browserPathInput" type="text" autocomplete="off" spellcheck="false" aria-label="Folder path">
+        <button class="button" type="submit">Go</button>
+      </div>
+    </form>
+    <div class="browser-quick" id="browserQuick"></div>
+    <div class="browser-list" id="browserList"></div>
+    <p class="browser-error" id="browserError" hidden></p>
+    <div class="modal-actions">
+      <button class="button" type="button" data-dialog-close="folderBrowserDialog">Cancel</button>
+      <button class="button button-primary" id="browserUseBtn" type="button"><svg><use href="#i-folder"/></svg> Use this folder</button>
+    </div>
+  </dialog>
+
+  <div class="drop-overlay" id="dropOverlay" aria-hidden="true">
+    <div class="drop-card">
+      <div class="drop-icon"><svg><use href="#i-play"/></svg></div>
+      <h2>Drop to play</h2>
+      <p>Dropped files play right away — they are not added to your library.</p>
+    </div>
+  </div>
+
+  <div class="toast-region" id="toastRegion" aria-live="polite" aria-atomic="true"></div>
+
+  <script src="app.js?v=1.0.0"></script>
+</body>
+</html>

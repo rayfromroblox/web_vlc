@@ -1,0 +1,50 @@
+{
+  "name": "web-vlc",
+  "version": "1.0.0",
+  "description": "A private, local-first media library and player that runs in your browser",
+  "license": "MIT",
+  "author": "rayfromroblox",
+  "homepage": "https://github.com/rayfromroblox/web_vlc#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rayfromroblox/web_vlc.git"
+  },
+  "bin": {
+    "web-vlc": "start.js",
+    "webvlc": "start.js"
+  },
+  "main": "server.js",
+  "files": [
+    "start.js",
+    "server.js",
+    "db.js",
+    "config.js",
+    "library.js",
+    "public",
+    "README.md"
+  ],
+  "scripts": {
+    "start": "node start.js",
+    "check": "node --check start.js && node --check server.js && node --check db.js && node --check config.js && node --check library.js && node --check public/app.js",
+    "lint": "oxlint",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "keywords": [
+    "vlc",
+    "media",
+    "player",
+    "local-first",
+    "video",
+    "music"
+  ],
+  "dependencies": {
+    "express": "^5.2.1"
+  },
+  "devDependencies": {
+    "@oxlint/plugins": "1.88.0",
+    "oxlint": "1.88.0"
+  }
+}

@@ -1,0 +1,14 @@
+node_modules/
+/.history/
+/release/
+/runtime/
+edits.db
+thumbnails/
+.env
+.env.*
+*.db-shm
+*.db-wal
+server.log
+*.tgz
+.DS_Store
+npm-debug.log*
